@@ -1,4 +1,3 @@
-# Modulo principal
 import discord
 import asyncio
 import logging
@@ -9,11 +8,30 @@ import inspect
 import naviutil
 from enum import Enum, auto
 
-class Permission(Enum):
-    BASIC = auto()
-    MOD = auto()
-    ADMIN = auto()
-    OWNER = auto()
+class CommandError(Exception):
+    pass
+
+class TimeoutContext:
+    def __init__(self, waitfor, callable, callback=None, **kwargs):
+        self.waitfor = waitfor
+        self.callable = callable
+        self.callback = callback
+        self.kwargs = kwargs
+        self.runningtask = None
+
+    async def send(self):
+        await asyncio.sleep(self.waitfor)
+        await self.callable(self, self.kwargs)
+
+        if self.callback:
+            await self.callback(self, self.kwargs)
+        
+        self.runningtask = None
+
+    def create_task(self):
+        assert not self.runningtask
+        
+        self.runningtask = asyncio.get_running_loop().create_task(self.send())
 
 class Command:
     def __init__(self, bot):
@@ -46,9 +64,8 @@ class BotCommand(Command):
         if self.enable_usermap:
             self.usermap = {}
 
-    @staticmethod
-    def create_response_embed(message, description=''):
-        return Bot.create_response_embed(message, description)
+    def create_response_embed(self, message, description=''):
+        return self.bot.create_response_embed(message, description)
 
     def get_user_storage(self, author):
         assert self.enable_usermap
@@ -69,12 +86,10 @@ class CommandAlias:
     def __init__(self, origin):
         self.origin = origin
 
-class CommandError(Exception):
-    pass
-
 class Client(discord.Client):
     def __init__(self):
         super().__init__()
+        
         self.listeners = {}
 
     async def on_message(self, message):
@@ -84,6 +99,8 @@ class Client(discord.Client):
         self.run(token)
 
     def register_event(self, eventname, coroutinefunc):
+        assert asyncio.iscoroutinefunction(coroutinefunc)
+
         if eventname in self.listeners:
             self.listeners[eventname].append(coroutinefunc)
         else:
@@ -92,8 +109,7 @@ class Client(discord.Client):
 
     async def dispatch_event(self, eventname, **kwargs):
         for coroutine in self.listeners[eventname]:
-            if asyncio.iscoroutinefunction(coroutine):
-                await coroutine(kwargs)
+            await coroutine(kwargs)
 
 class Config:
     def __init__(self, configfile):
@@ -137,6 +153,7 @@ class Bot:
         self.client.register_event('message', self.receive_message)
 
         self.commands = {}
+        
         self.load_modules(f'{self.curr_path}/modules')
 
     def load_modules(self, dirpath):
@@ -164,8 +181,7 @@ class Bot:
     def listen(self):
         self.client.listen(self.config.get('global.token'))
 
-    @staticmethod
-    def create_response_embed(message, description=""):
+    def create_response_embed(self, message, description=""):
         return discord.Embed(description=description).set_footer(
             text=message.author.name, 
             icon_url=message.author.avatar_url_as(size=32)

@@ -1,4 +1,3 @@
-# Modulo de comandos nativos
 import random
 import inspect
 import asyncio
@@ -99,31 +98,6 @@ class CAvatar(navibot.BotCommand):
         embed.set_image(url=target.avatar_url_as(size=256))
         return embed
 
-# @TODO: Mudar SleepyReminder para um objeto mais genérico que faça a mesma coisa
-# Ex: TimeoutContext, aonde recebe um pacote devalores (dict) e chama uma função depois de X segundos
-# Deverá suportar também uma callback APÓS finalizar a callable principal.
-class SleepyReminder:
-    def __init__(self, author, message, waitfor, callable, callback=None):
-        self.author = author
-        self.message = message
-        self.waitfor = waitfor
-        self.callable = callable
-        self.callback = callback
-        self.runningtask = None
-
-    async def send(self):
-        await asyncio.sleep(self.waitfor)
-        await self.callable(self)
-
-        if self.callback:
-            await self.callback(self)
-        
-        self.runningtask = None
-
-    def create_task(self):
-        assert not self.runningtask
-        self.runningtask = asyncio.get_running_loop().create_task(self.send())
-
 class CRemind(navibot.BotCommand):
     def initialize(self):
         self.name = "remind"
@@ -148,17 +122,26 @@ class CRemind(navibot.BotCommand):
         stored = self.get_user_storage(message.author)
 
         if len(stored) < self.limit:
-            r = SleepyReminder(message.author, text, seconds, callable=self.callable_send_reminder, callback=self.callable_free_reminder)
-            stored.append(r)
-            r.create_task()
+            t = navibot.TimeoutContext(seconds, self.callable_send_reminder, callback=self.callable_free_reminder, author=message.author, text=text)
+            stored.append(t)
+            t.create_task()
         else:
             raise navibot.CommandError(f"Você atingiu o limite de {self.limit} lembretes registrados, por favor tente mais tarde.")
         
-    async def callable_send_reminder(self, reminder):
-        await reminder.author.send(f"Olá <@{reminder.author.id}>, estou te avisando sobre um lembrete!" if not reminder.message else f"Olá <@{reminder.author.id}>, estou te avisando sobre: {reminder.message}")
+    async def callable_send_reminder(self, reminder, kwargs):
+        author = kwargs.get('author', None)
+        text = kwargs.get('text', None)
 
-    async def callable_free_reminder(self, reminder):
+        assert author
+
+        await reminder.author.send(f"Olá <@{author.id}>, estou te avisando sobre um lembrete!" if not text else f"Olá <@{author.id}>, estou te avisando sobre: {text}")
+
+    async def callable_free_reminder(self, reminder, kwargs):
+        author = kwargs.get('author', None)
+        assert author
         stored = self.get_user_storage(reminder.author)
+        assert stored
+
         try:
             stored.remove(reminder)
         except ValueError:

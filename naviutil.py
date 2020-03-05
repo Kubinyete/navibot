@@ -1,4 +1,3 @@
-# Funções úteis
 import re
 import logging
 
