@@ -5,6 +5,7 @@ import json
 import os
 import importlib
 import inspect
+import time
 import naviutil
 from enum import Enum, auto
 
@@ -17,21 +18,58 @@ class TimeoutContext:
         self.callable = callable
         self.callback = callback
         self.kwargs = kwargs
-        self.runningtask = None
+        self.running_task = None
+        self.caught_exception = None
 
-    async def send(self):
-        await asyncio.sleep(self.waitfor)
-        await self.callable(self, self.kwargs)
+    async def run(self):
+        try:
+            await asyncio.sleep(self.waitfor)
+            await self.callable(self, self.kwargs)
 
-        if self.callback:
-            await self.callback(self, self.kwargs)
-        
-        self.runningtask = None
+            if self.callback:
+                await self.callback(self, self.kwargs)
+        except Exception as e:
+            self.caught_exception = e
+        finally:
+            self.running_task = None
 
     def create_task(self):
-        assert not self.runningtask
+        assert not self.running_task
         
-        self.runningtask = asyncio.get_running_loop().create_task(self.send())
+        self.running_task = asyncio.get_running_loop().create_task(self.run())
+
+
+class IntervalContext(TimeoutContext):
+    def __init__(self, waitfor, callable, max_count=0, callback=None, ignore_exception=False, **kwargs):
+        super().__init__(waitfor, callable, callback=callback, **kwargs)
+        self.ignore_exception = ignore_exception
+        self.max_count = max_count
+        self.safe_halt = False
+        self.run_count = 0
+    
+    async def run(self):
+        time_start = 0
+        time_delta = 0
+
+        try:
+            while not self.safe_halt and (self.max_count <= 0 or self.run_count < self.max_count):
+                time_start = time.time()
+                
+                try:
+                    self.run_count += 1
+                    await self.callable(self, self.kwargs)
+                except Exception as e:
+                    if self.caught_exception and not self.ignore_exception:
+                        raise self.caught_exception
+                finally:
+                    time_delta = time.time() - time_start
+                    await asyncio.sleep(self.waitfor - time_delta)    
+        except Exception as e:
+            self.caught_exception = e
+        finally:
+            self.running_task = None
+
+            await self.callback(self, self.kwargs)
 
 class Command:
     def __init__(self, bot):

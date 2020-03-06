@@ -134,15 +134,72 @@ class CRemind(navibot.BotCommand):
 
         assert author
 
-        await reminder.author.send(f"Olá <@{author.id}>, estou te avisando sobre um lembrete!" if not text else f"Olá <@{author.id}>, estou te avisando sobre: {text}")
+        await author.send(f"Olá <@{author.id}>, estou te avisando sobre um **lembrete**!" if not text else f"Olá <@{author.id}>, estou te avisando sobre:\n`{text}`")
 
     async def callable_free_reminder(self, reminder, kwargs):
         author = kwargs.get('author', None)
         assert author
-        stored = self.get_user_storage(reminder.author)
+
+        stored = self.get_user_storage(author)
         assert stored
 
         try:
             stored.remove(reminder)
         except ValueError:
-            logging.error(f"CREMIND > callback_remove_reminder > Failed to remove Reminder from user storage, reminder = {reminder}")
+            logging.error(f"CREMIND > callback_remove_reminder > Failed to remove {type(reminder)} from user storage, context = {reminder}")
+
+class CCountdown(navibot.BotCommand):
+    def initialize(self):
+        self.name = "countdown"
+        self.aliases = ['cd']
+        self.description = "Pede para o bot efetuar uma contagem regressiva de acordo com o número informado."
+        self.usage = f"{self.name} [comercar_de]"
+        self.enable_usermap = True
+
+        # Isso é chamado durante o construtor suoer().__init__(), portanto, podemos adicionar novos atributos
+        self.limit = 1
+
+    async def run(self, message, args, flags):
+        seconds = 3
+
+        if args:
+            try:
+                seconds = int(args[0])
+
+                assert seconds >= 1 and seconds <= 10
+            except ValueError:
+                raise navibot.CommandError(f"O número da contagem regressiva não é um número válido.")
+            except AssertionError:
+                raise navibot.CommandError(f"O número da contagem regressiva precisa estar entre 1 à 10 (segundos).")
+
+        stored = self.get_user_storage(message.author)
+
+        if len(stored) < self.limit:
+            i = navibot.IntervalContext(seconds, self.callable_send_number, max_count=seconds + 1, callback=self.callable_free_countdown, current_count=seconds, message=message)
+            stored.append(i)
+            i.create_task()
+        else:
+            raise navibot.CommandError(f"Você atingiu o limite de {self.limit} contagem(s) regressiva(s), por favor tente mais tarde.")
+        
+    async def callable_send_number(self, interval, kwargs):
+        message = kwargs.get('message', None)
+        current_count = kwargs.get('current_count', 0)
+
+        assert message
+        assert current_count >= 0
+
+        await message.channel.send(f"{current_count}!")
+
+        kwargs['current_count'] = current_count - 1
+
+    async def callable_free_countdown(self, interval, kwargs):
+        message = kwargs.get('message', None)
+        assert message
+
+        stored = self.get_user_storage(message.author)
+        assert stored
+
+        try:
+            stored.remove(interval)
+        except ValueError:
+            logging.error(f"CREMIND > callback_free_countdown > Failed to remove {type(interval)}  from user storage, context = {interval}")
