@@ -125,6 +125,7 @@ class CRemind(navibot.BotCommand):
             t = navibot.TimeoutContext(seconds, self.callable_send_reminder, callback=self.callable_free_reminder, author=message.author, text=text)
             stored.append(t)
             t.create_task()
+            await message.add_reaction('✅')
         else:
             raise navibot.CommandError(f"Você atingiu o limite de {self.limit} lembretes registrados, por favor tente mais tarde.")
         
@@ -134,7 +135,7 @@ class CRemind(navibot.BotCommand):
 
         assert author
 
-        await author.send(f"Olá <@{author.id}>, estou te avisando sobre um **lembrete**!" if not text else f"Olá <@{author.id}>, estou te avisando sobre:\n`{text}`")
+        await author.send(f":bell: Olá <@{author.id}>, estou te avisando sobre um **lembrete**!" if not text else f":bell: Olá <@{author.id}>, estou te avisando sobre:\n`{text}`")
 
     async def callable_free_reminder(self, reminder, kwargs):
         author = kwargs.get('author', None)

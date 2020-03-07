@@ -69,7 +69,8 @@ class IntervalContext(TimeoutContext):
         finally:
             self.running_task = None
 
-            await self.callback(self, self.kwargs)
+            if self.callback:
+                await self.callback(self, self.kwargs)
 
 class Command:
     def __init__(self, bot):
