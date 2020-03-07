@@ -35,7 +35,7 @@ class TimeoutContext:
 
     def create_task(self):
         assert not self.running_task
-        
+        self.caught_exception = None
         self.running_task = asyncio.get_running_loop().create_task(self.run())
 
 
@@ -59,8 +59,8 @@ class IntervalContext(TimeoutContext):
                     self.run_count += 1
                     await self.callable(self, self.kwargs)
                 except Exception as e:
-                    if self.caught_exception and not self.ignore_exception:
-                        raise self.caught_exception
+                    if not self.ignore_exception:
+                        raise e
                 finally:
                     time_delta = time.time() - time_start
                     await asyncio.sleep(self.waitfor - time_delta)    
@@ -133,6 +133,9 @@ class Client(discord.Client):
     async def on_message(self, message):
         await self.dispatch_event('message', message=message)
 
+    async def on_ready(self):
+        await self.dispatch_event('ready')
+
     def listen(self, token):
         self.run(token)
 
@@ -183,15 +186,16 @@ class Bot:
         )
 
         self.curr_path = os.path.dirname(os.path.abspath(__file__))
+        self.playing_interval = None
 
         self.config = Config(configfile)
         self.config.load()
         
         self.client = Client()
         self.client.register_event('message', self.receive_message)
+        self.client.register_event('ready', self.receive_ready)
 
         self.commands = {}
-        
         self.load_modules(f'{self.curr_path}/modules')
 
     def load_modules(self, dirpath):
@@ -202,7 +206,7 @@ class Bot:
                     self.load_commands_from_module(mod)
 
     def load_commands_from_module(self, mod):
-        logging.info(f"NAVIBOT > Attempting to load commands from module -> {mod}")
+        logging.info(f"Attempting to load commands from module: {mod}")
         
         for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and naviutil.is_subclass(x, BotCommand)):
             cmd = obj[1](self)
@@ -214,16 +218,30 @@ class Bot:
             for alias in cmd.aliases:
                 self.commands[alias] = CommandAlias(cmd)
 
-            logging.info(f"NAVIBOT > Successfully loaded a new BotCommand -> {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+            logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
 
     def listen(self):
         self.client.listen(self.config.get('global.token'))
 
     def create_response_embed(self, message, description=""):
-        return discord.Embed(description=description).set_footer(
+        return discord.Embed(description=description, color=discord.Color.magenta()).set_footer(
             text=message.author.name, 
             icon_url=message.author.avatar_url_as(size=32)
         )
+
+    async def set_playing_game(self, playingstr, status=None, afk=False):
+        await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
+
+    async def receive_ready(self, kwargs):
+        logging.info(f"Successfully logged in")
+
+        if self.playing_interval is None:
+            self.playing_interval = IntervalContext(
+                self.config.get('global.playing_delay', 60),
+                self.callable_update_playing
+            )
+
+            self.playing_interval.create_task()
 
     async def receive_message(self, kwargs):
         message = kwargs.get('message', None)
@@ -248,17 +266,17 @@ class Bot:
         output = None
         command = command.origin if isinstance(command, CommandAlias) else command
 
-        logging.info(f'NAVIBOT > Handling execution of {command.name} = {command}')
+        logging.info(f'Handling execution of {command.name}: {command}')
         
         assert naviutil.is_instance(command, BotCommand)
 
         try:
             output = await command.run(message, args[1:], flags)
         except CommandError as e:
-            logging.warn(f'NAVIBOT > Command {command.name} threw an error: {e}')
+            logging.warn(f'Command {command.name} threw an error: {e}')
             output = e
         except Exception as e:
-            logging.error(f'NAVIBOT > Uncaught exception thrown while running {command.name}: {e}')
+            logging.error(f'Uncaught exception thrown while running {command.name}: {e}')
         finally:
             if output:
                 if isinstance(output, str):
@@ -268,4 +286,20 @@ class Bot:
                 elif isinstance(output, CommandError):
                     await message.channel.send(embed=self.create_response_embed(message, f"{output}"))
                 else:
-                    logging.error(f'NAVIBOT > Command {command.name} output is invalid: {output}')
+                    logging.error(f'Command {command.name} output is invalid: {output}')
+
+    async def callable_update_playing(self, intervalcontext, kwargs):
+        index = kwargs.get('index', 0)
+        playing_list = self.config.get('global.playing', None)
+
+        if not playing_list or len(playing_list) == 1:
+            intervalcontext.safe_halt = True
+
+            if playing_list:
+                await self.set_playing_game(playing_list[index])
+        else:
+            if index >= len(playing_list):
+                index = 0
+
+            await self.set_playing_game(playing_list[index])
+            kwargs['index'] = index + 1
