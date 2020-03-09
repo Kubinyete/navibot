@@ -72,6 +72,27 @@ class IntervalContext(TimeoutContext):
             if self.callback:
                 await self.callback(self, self.kwargs)
 
+class Slider:
+    def __init__(self, items, message_origin, client, reaction_right=r'▶️', reaction_left='◀️', restricted=False, startat=0, timeout=60):
+        self.items = items
+        self.message_origin = message_origin
+        self.client = client
+        self.reaction_right = reaction_right
+        self.reaction_left = reaction_left
+        self.restricted = False
+        self.current_index = startat
+        self.timeout = timeout
+        self.running_task = None
+
+    async def run(self):
+        raise NotImplementedError()
+
+    def create_task(self):
+        assert not self.running_task
+        self.caught_exception = None
+        self.running_task = asyncio.get_running_loop().create_task(self.run())
+
+
 class Command:
     def __init__(self, bot):
         self.bot = bot
