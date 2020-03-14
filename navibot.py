@@ -73,25 +73,95 @@ class IntervalContext(TimeoutContext):
                 await self.callback(self, self.kwargs)
 
 class Slider:
-    def __init__(self, items, message_origin, client, reaction_right=r'▶️', reaction_left='◀️', restricted=False, startat=0, timeout=60):
-        self.items = items
-        self.message_origin = message_origin
+    def __init__(self, client, message, items, reaction_right=r'▶️', reaction_left=r'◀️', restricted=False, startat=0, timeout=60):
         self.client = client
+        self.message = message
+        self.items = items
         self.reaction_right = reaction_right
         self.reaction_left = reaction_left
-        self.restricted = False
+        self.restricted = restricted
         self.current_index = startat
         self.timeout = timeout
-        self.running_task = None
 
-    async def run(self):
-        raise NotImplementedError()
-
-    def create_task(self):
-        assert not self.running_task
+        self.sent_message = None
+        self.last_activity = 0
+        self.registered_event_id = None
         self.caught_exception = None
-        self.running_task = asyncio.get_running_loop().create_task(self.run())
 
+    def forward(self):
+        self.current_index += 1
+
+        if self.current_index >= len(self.items):
+            self.current_index = 0
+
+
+    def backward(self):
+        self.current_index -= 1
+
+        if self.current_index < 0:
+            self.current_index = len(self.items) - 1
+
+    def get_current_item(self):
+        return self.items[self.current_index]
+
+
+    async def callable_on_add_reaction(self, kwargs):
+        reaction = kwargs.get('reaction', None)
+        user = kwargs.get('user', None)
+
+        assert self.sent_message is not None
+        assert reaction
+        assert user
+        assert self.registered_event_id
+
+        if reaction.message.id != self.sent_message.id or user == self.client.user or (self.restricted and user != self.message.author):
+            return
+
+        if reaction.emoji == self.reaction_right:
+            self.forward()
+        elif reaction.emoji == self.reaction_left:
+            self.backward()
+        else:
+            return
+
+        curritem = self.get_current_item()
+
+        try:
+            await self.sent_message.edit(embed=curritem)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            self.caught_exception = e
+        finally:
+            if self.caught_exception:
+                self.client.remove_event('reaction_add')
+            else:
+                self.last_activity = time.time()
+
+    async def send(self):
+        assert self.items
+
+        curritem = self.get_current_item()
+
+        try:
+            self.sent_message = await self.message.channel.send(embed=curritem)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            self.caught_exception = e
+
+        if not self.caught_exception:
+            if len(self.items) == 1:
+                return
+            else:
+                self.registered_event_id = self.client.register_event('reaction_add', self.callable_on_add_reaction)
+
+            await asyncio.gather(
+                self.sent_message.add_reaction(self.reaction_left),
+                self.sent_message.add_reaction(self.reaction_right)
+            )
+
+            self.last_activity = time.time()
+            while time.time() - self.last_activity <= self.timeout:
+                await asyncio.sleep(self.timeout)
+
+            self.client.remove_event("reaction_add", self.registered_event_id)
 
 class Command:
     def __init__(self, bot):
@@ -158,6 +228,9 @@ class Client(discord.Client):
     async def on_ready(self):
         await self.dispatch_event('ready')
 
+    async def on_reaction_add(self, reaction, user):
+        await self.dispatch_event('reaction_add', reaction=reaction, user=user)
+
     def listen(self, token):
         self.run(token)
 
@@ -169,6 +242,11 @@ class Client(discord.Client):
         else:
             self.listeners[eventname] = list()
             self.listeners[eventname].append(coroutinefunc)
+
+        return len(self.listeners[eventname]) - 1
+
+    def remove_event(self, eventname, id):
+        return self.listeners[eventname].pop(id)
 
     async def dispatch_event(self, eventname, **kwargs):
         for coroutine in self.listeners[eventname]:
