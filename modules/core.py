@@ -26,7 +26,9 @@ class CHelp(navibot.BotCommand):
         self.usage = f"{self.name} [cmd]"
 
     async def run(self, message, args, flags):
-        text = ""
+        text = "**NaviBot** é um bot **experimental** escrito utilizando a biblioteca [discord.py](https://github.com/Rapptz/discord.py) por razões de aprendizado, mais específicamente para experimentar com o asyncio e também conseguir construir e replicar algumas funcionalidades que já vi serem implementadas."
+        text += f"\n\n:information_source: Digite `help [comando]` para obter mais informações."
+        text += f"\n\n**Comandos disponíveis**:\n\n"
 
         if args:
             target = args[0]
@@ -34,12 +36,9 @@ class CHelp(navibot.BotCommand):
 
             if target:
                 target = target.origin if naviutil.is_instance(target, navibot.CommandAlias) else target
-                text += f"{target.description}\n\n`{target.usage}`"
-                embed = self.create_response_embed(message, text)
-                embed.title = f"{target.name}" if not target.aliases else f"{target.name} {target.aliases}"
-                return embed
+                return target.get_usage_embed(message)
             else:
-                raise navibot.CommandError(f"O comando '{args[0]}' não existe.")
+                raise navibot.CommandError(f"O comando `{args[0]}` não existe.")
 
         for key, value in self.bot.commands.items():
             if naviutil.is_instance(value, navibot.CommandAlias):
@@ -51,7 +50,7 @@ class CHelp(navibot.BotCommand):
             text += f"`{key}` ({mdlstr}.{typestr})\n"
 
         embed = self.create_response_embed(message, text)
-        embed.title = "Comandos"
+        embed.title = "NaviBot"
 
         return embed
 
@@ -91,7 +90,8 @@ class CAvatar(navibot.BotCommand):
         target = message.mentions[0] if message.mentions else None
 
         if not target:
-            raise navibot.CommandError("É preciso mencionar como argumento o usuário.")
+            #raise navibot.CommandError("É preciso mencionar como argumento o usuário.")
+            return self.get_usage_embed(message)
 
         embed = self.create_response_embed(message) 
         embed.title = f"Avatar de {target.name}"
@@ -111,7 +111,7 @@ class CRemind(navibot.BotCommand):
 
     async def run(self, message, args, flags):
         if not 'time' in flags:
-            raise navibot.CommandError(f"É preciso informar como argumento o tempo de espera `--time`.")
+            return self.get_usage_embed(message)
 
         text = ' '.join(args) if args else ''
         seconds = naviutil.parse_timespan_seconds(flags['time'])

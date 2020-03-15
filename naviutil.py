@@ -1,4 +1,5 @@
 import re
+import math
 import logging
 
 def parse_args(string):
@@ -118,3 +119,40 @@ def parse_timespan_seconds(string):
 		pass
 
 	return segundos
+
+def bytes_string(bytes):
+	sizes = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
+
+	i = 0
+	while (bytes / 1024.0 >= 1):
+		bytes = math.floor(bytes / 1024.0)
+		i += 1
+
+	return f"{bytes:.0f} {sizes[i]}"
+	
+def seconds_string(seconds):
+	d = math.floor(seconds / 86400)
+	seconds -= d * 86400
+
+	h = math.floor(seconds / 3600)
+	seconds -= h * 3600
+	
+	m = math.floor(seconds / 60)
+	seconds -= m * 60
+
+	output = []
+
+	if d >= 1:
+		output.append(f"{d} dia(s)")
+	if h >= 1:
+		output.append(f"{h} hora(s)")
+	if m >= 1:
+		output.append(f"{m} minuto(s)")
+	if seconds > 0:
+		output.append(f"{seconds} segundo(s)")
+	
+	return ", ".join(output)
+
+def number_length(num):
+    assert num >= 0
+    return math.ceil(math.log10(num))

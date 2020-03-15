@@ -7,6 +7,7 @@ import importlib
 import inspect
 import time
 import naviutil
+import traceback
 from enum import Enum, auto
 
 class CommandError(Exception):
@@ -102,8 +103,9 @@ class Slider:
             self.current_index = len(self.items) - 1
 
     def get_current_item(self):
-        return self.items[self.current_index]
-
+        cpy = self.items[self.current_index].copy()
+        cpy.set_footer(text=f"{cpy.footer.text} <{self.current_index + 1}/{len(self.items)}>", icon_url=cpy.footer.icon_url)
+        return cpy
 
     async def callable_on_add_reaction(self, kwargs):
         reaction = kwargs.get('reaction', None)
@@ -112,7 +114,7 @@ class Slider:
         assert self.sent_message is not None
         assert reaction
         assert user
-        assert self.registered_event_id
+        assert type(self.registered_event_id) is not None
 
         if reaction.message.id != self.sent_message.id or user == self.client.user or (self.restricted and user != self.message.author):
             return
@@ -161,7 +163,8 @@ class Slider:
             while time.time() - self.last_activity <= self.timeout:
                 await asyncio.sleep(self.timeout)
 
-            self.client.remove_event("reaction_add", self.registered_event_id)
+            if not self.caught_exception:
+                self.client.remove_event("reaction_add", self.registered_event_id)
 
 class Command:
     def __init__(self, bot):
@@ -196,6 +199,12 @@ class BotCommand(Command):
 
     def create_response_embed(self, message, description=''):
         return self.bot.create_response_embed(message, description)
+
+    def get_usage_embed(self, message):
+        text = f"{self.description}\n\n`{self.usage}`"
+        embed = self.create_response_embed(message, text)
+        embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
+        return embed
 
     def get_user_storage(self, author):
         assert self.enable_usermap
@@ -376,15 +385,18 @@ class Bot:
             logging.warn(f'Command {command.name} threw an error: {e}')
             output = e
         except Exception as e:
-            logging.error(f'Uncaught exception thrown while running {command.name}: {e}')
+            logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
         finally:
             if output:
                 if isinstance(output, str):
-                    await message.channel.send(output)
+                    #await message.channel.send(output)
+                    await message.channel.send(embed=self.create_response_embed(message, description=output))
                 elif isinstance(output, discord.Embed):
                     await message.channel.send(embed=output)
+                elif isinstance(output, Slider):
+                    await output.send()
                 elif isinstance(output, CommandError):
-                    await message.channel.send(embed=self.create_response_embed(message, f"{output}"))
+                    await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {output}"))
                 else:
                     logging.error(f'Command {command.name} output is invalid: {output}')
 
