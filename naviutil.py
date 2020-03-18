@@ -211,8 +211,3 @@ def string_fullwidth(string):
 
 def string_fullwidth_alphanumeric(string):
     return ''.join([char_fullwidth_alphanumeric(char) for char in string])
-
-if __name__ == "__main__":
-    teste = 'echokkkkkk "batata doce"ihhh"doce2" testee-h--flag --flag2=1|grep arg1 arg2 "ola mundo" -v --teste=true||||'
-    print(f"Test is: {teste}")
-    print(parse_command_string(teste))
