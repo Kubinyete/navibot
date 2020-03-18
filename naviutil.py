@@ -2,77 +2,114 @@ import re
 import math
 import logging
 
-def parse_args(string):
-    # @TODO: Evitar de transform "-X" em uma flag, pois queremos também inserir números negativos
-    args = []
-    flags = {}
-    buffer = ""
-    stringAtiva = False
-    stringEscape = False
+ESCAPE_SEQUENCE_MAP = {
+    'a': '\a',
+    'b': '\b',
+    'f': '\f',
+    'n': '\n',
+    'r': '\r',
+    't': '\t',
+    'v': '\v',
+    '\\': '\\',
+    '\'': '\'',
+    '"': '\"'
+}
 
-    for c in string:
-        if not stringAtiva:
-            if c == "\"":
-                stringAtiva = True
-            elif c != " ":
-                buffer += c
-            else:
-                if len(buffer) > 0:
-                    args.append(buffer)
-                    buffer = ""
-        else:
-            if c == "\\":
-                if not stringEscape:
-                    stringEscape = True
-                else:
-                    stringEscape = False
-                    buffer += c
-            elif c == "\"":
-                if stringEscape:
-                    stringEscape = False
-                    buffer += c
-                else:
-                    stringAtiva = False
-                    args.append(buffer)
-                    buffer = ""
-            else:
-                if stringEscape:
-                    buffer += "\\"
-                stringEscape = False
-                buffer += c
+def create_command_dict():
+    return {
+        'command': '',
+        'args': [],
+        'flags': {}
+    }
 
-    if len(buffer) > 0:
-        args.append(buffer)
+def translate_escape_sequence(code):
+    try:
+        return ESCAPE_SEQUENCE_MAP[code]
+    except KeyError:
+        return code
 
-    i = 0
-    while i < len(args):
-        arg = args[i]
+def parse_command_buffer(current, buffer):
+    if not current['command']:
+        current['command'] = buffer
+    else:
+        flags = current['flags']
+        args = current['args']
 
-        if arg.startswith("--"):
-            kv = arg.split("=")
+        if buffer.startswith("--"):
+            kv = buffer.split("=")
 
             if len(kv) > 1:
                 flags[kv[0][2:]] = "=".join(kv[1:])
-                
-                args.remove(arg)
-                i = i - 1
             else:
                 if len(kv[0][2:]) > 0:
                     flags[kv[0][2:]] = True
-                    
-                    args.remove(arg)
-                    i = i - 1
+        elif buffer.startswith("-"):
+            if len(buffer) > 1:
+                flags[buffer[1:]] = True
+        else:
+            args.append(buffer)
 
-        elif arg.startswith("-"):
-            if len(arg) > 1:
-                flags[arg[1:]] = True
-                
-                args.remove(arg)
-                i = i - 1
+def parse_command_string(string):
+    commands = [create_command_dict()]
+    current = commands[0]
+    buffer = ''
 
-        i = i + 1
+    # @FIXME: Fazer algo mais elegante que isso rsrsrsrs.
+    string += ' '
 
-    return args, flags
+    eating_str = False
+    eating_espace_sequence = False
+
+    for c in string:
+        if not eating_str:
+            if c == '"':
+                if buffer:
+                    parse_command_buffer(current, buffer)
+                eating_str = True
+                buffer = ''
+            elif c == '|':
+                if not current['command']:
+                    raise ValueError("Erro de sintaxe, esperado comando após PIPE.")
+
+                if buffer:
+                    parse_command_buffer(current, buffer)
+                current = create_command_dict()
+                commands.append(current)
+                buffer = ''
+            elif c != ' ':
+                buffer += c
+            else:
+                if buffer:
+                    parse_command_buffer(current, buffer)
+                    buffer = ''
+        else:
+            if c == '\\':
+                if not eating_espace_sequence:
+                    eating_espace_sequence = True
+                else:
+                    eating_espace_sequence = False
+                    buffer += c
+            elif c == '"':
+                if eating_espace_sequence:
+                    eating_espace_sequence = False
+                    buffer += c
+                else:
+                    eating_str = False
+
+                    if not current['command']:
+                        current['command'] = buffer
+                    else:
+                        current['args'].append(buffer)
+
+                    buffer = ''
+            else:
+                if eating_espace_sequence:
+                    buffer += translate_escape_sequence(c)
+                    eating_espace_sequence = False
+                else:
+                    buffer += c
+
+    return commands
 
 def is_subclass(cls, clsparent):
     if cls.__name__ == clsparent.__name__:
@@ -156,3 +193,26 @@ def seconds_string(seconds):
 def number_length(num):
     assert num >= 0
     return math.ceil(math.log10(num))
+
+def char_in_range(char, min, max):
+    val = ord(char)
+    return val >= ord(min) and val <= ord(max)
+
+def char_fullwidth(char):
+    # \uff21 = Ａ
+    # \u3000 = (fullwidth whitespace)
+    return chr(ord(char) - 65 + ord('\uff21')) if char != ' ' else '\u3000'
+
+def char_fullwidth_alphanumeric(char):
+    return char_fullwidth(char) if char == ' ' or char_in_range(char, 'a', 'z') or char_in_range(char, 'A', 'Z') or char_in_range(char, '0', '9') else char
+
+def string_fullwidth(string):
+    return ''.join([char_fullwidth(char) for char in string])
+
+def string_fullwidth_alphanumeric(string):
+    return ''.join([char_fullwidth_alphanumeric(char) for char in string])
+
+if __name__ == "__main__":
+    teste = 'echokkkkkk "batata doce"ihhh"doce2" testee-h--flag --flag2=1|grep arg1 arg2 "ola mundo" -v --teste=true||||'
+    print(f"Test is: {teste}")
+    print(parse_command_string(teste))

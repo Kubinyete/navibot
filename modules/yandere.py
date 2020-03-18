@@ -9,7 +9,7 @@ class CYandere(navibot.BotCommand):
         self.name = "yandere"
         self.aliases = ['ynd']
         self.description = "Exibe um Slider de uma ou mais imagens retornadas pela API do site yande.re de acordo com as tags informadas por argumento."
-        self.usage = f"{self.name} [--post] [tag1] [tagN]... | --tag [tagname1...]"
+        self.usage = f"{self.name} [--post] [tag1] [tagN]... [--page=1] | --tag [tagname1...]"
 
         self.api = YandereApi()
         # @TODO: Solução temporária até adicionarmos o contexto de variáveis de uma Guild
@@ -24,7 +24,7 @@ class CYandere(navibot.BotCommand):
         inputstr = ' '.join(args)
 
         try:
-            page = flags.get('page', 0)
+            page = flags.get('page', 1)
             
             if type(page) is str:
                 page = int(page)

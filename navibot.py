@@ -13,6 +13,9 @@ from enum import Enum, auto
 class CommandError(Exception):
     pass
 
+class PipeError(Exception):
+    pass
+
 class TimeoutContext:
     def __init__(self, waitfor, callable, callback=None, **kwargs):
         self.waitfor = waitfor
@@ -152,7 +155,7 @@ class Slider:
             if len(self.items) == 1:
                 return
             else:
-                self.registered_event_id = self.client.register_event('reaction_add', self.callable_on_add_reaction)
+                self.registered_event_id = self.client.register_event('reaction_add', self.callable_on_add_reaction, name=f'slider_send_{self.sent_message.id}')
 
             await asyncio.gather(
                 self.sent_message.add_reaction(self.reaction_left),
@@ -243,22 +246,27 @@ class Client(discord.Client):
     def listen(self, token):
         self.run(token)
 
-    def register_event(self, eventname, coroutinefunc):
+    def register_event(self, eventname, coroutinefunc, name=None):
         assert asyncio.iscoroutinefunction(coroutinefunc)
 
-        if eventname in self.listeners:
-            self.listeners[eventname].append(coroutinefunc)
-        else:
-            self.listeners[eventname] = list()
-            self.listeners[eventname].append(coroutinefunc)
+        eid = coroutinefunc.__name__ if name is None else name
 
-        return len(self.listeners[eventname]) - 1
+        if not eventname in self.listeners:
+            self.listeners[eventname] = dict()
 
-    def remove_event(self, eventname, id):
-        return self.listeners[eventname].pop(id)
+        self.listeners[eventname][eid] = coroutinefunc
+        
+        return eid
+
+    def remove_event(self, eventname, eid):
+        del self.listeners[eventname][eid]
 
     async def dispatch_event(self, eventname, **kwargs):
-        for coroutine in self.listeners[eventname]:
+        if not eventname in self.listeners:
+            return
+
+        for eid, coroutine in self.listeners[eventname].items():
+            #logging.info(f"Dispatching event {eventname}, awaiting listener {eid} ({coroutine.__name__})")
             await coroutine(kwargs)
 
 class Config:
@@ -363,15 +371,27 @@ class Bot:
         if not message.content.startswith(prefix):
             return
         
-        args, flags = naviutil.parse_args(message.content[len(prefix):])
+        try:
+            commands = naviutil.parse_command_string(message.content[len(prefix):])
         
-        if args:
-            command = self.commands.get(args[0], None)
-         
-            if command:
-                await self.handle_command_execution(command, message, args, flags)
+            processing_output = None
+            i = 0
+            for command in commands:
+                i += 1
 
-    async def handle_command_execution(self, command, message, args, flags):
+                handler = self.commands.get(command['command'], None)
+
+                if handler:
+                    args = command['args']
+                    flags = command['flags']
+
+                    processing_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=processing_output, last_in_pipestream=i == len(commands))
+                else:
+                    raise ValueError(f"O comando `{command['command']}` não existe, abortando...")
+        except (ValueError, PipeError) as e:
+            await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {e}"))
+
+    async def handle_command_execution(self, command, message, args, flags, received_pipe_data=None, last_in_pipestream=False):
         output = None
         command = command.origin if isinstance(command, CommandAlias) else command
 
@@ -379,26 +399,37 @@ class Bot:
         
         assert naviutil.is_instance(command, BotCommand)
 
-        try:
-            output = await command.run(message, args[1:], flags)
-        except CommandError as e:
-            logging.warn(f'Command {command.name} threw an error: {e}')
-            output = e
-        except Exception as e:
-            logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
-        finally:
-            if output:
-                if isinstance(output, str):
-                    #await message.channel.send(output)
+        if 'h' in flags or 'help' in flags:
+            output = command.get_usage_embed(message)
+        else:
+            try:
+                if received_pipe_data:
+                    args.append(received_pipe_data)
+
+                output = await command.run(message, args, flags)
+            except CommandError as e:
+                logging.warn(f'Command {command.name} threw an error: {e}')
+                output = e
+            except Exception as e:
+                logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
+
+        if output:
+            if isinstance(output, str):
+                if last_in_pipestream:
                     await message.channel.send(embed=self.create_response_embed(message, description=output))
-                elif isinstance(output, discord.Embed):
-                    await message.channel.send(embed=output)
-                elif isinstance(output, Slider):
-                    await output.send()
-                elif isinstance(output, CommandError):
-                    await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {output}"))
                 else:
-                    logging.error(f'Command {command.name} output is invalid: {output}')
+                    return output
+            elif isinstance(output, discord.Embed):
+                await message.channel.send(embed=output)
+            elif isinstance(output, Slider):
+                await output.send()
+            elif isinstance(output, CommandError):
+                await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {output}"))
+            else:
+                logging.error(f'Command {command.name} output is invalid: {output}')
+
+        if not last_in_pipestream and not isinstance(output, str):
+            raise PipeError(f"Abortando saída através do PIPE, o retorno do comando `{command.name}` não pode ser passado adiante.")
 
     async def callable_update_playing(self, intervalcontext, kwargs):
         index = kwargs.get('index', 0)
