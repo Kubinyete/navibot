@@ -1,5 +1,6 @@
 import re
 import math
+import io
 import logging
 
 ESCAPE_SEQUENCE_MAP = {
@@ -50,6 +51,7 @@ def parse_command_buffer(current, buffer):
             args.append(buffer)
 
 def parse_command_string(string):
+    # @TODO: USAR io.StringIO NO LUGAR DE buffer
     commands = [create_command_dict()]
     current = commands[0]
     buffer = ''
