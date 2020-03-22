@@ -6,14 +6,18 @@ import os
 import importlib
 import inspect
 import time
-import naviutil
 import traceback
+import naviutil
+import naviparser
 from enum import Enum, auto
 
 class CommandError(Exception):
     pass
 
 class PipeError(Exception):
+    pass
+
+class BotError(Exception):
     pass
 
 class TimeoutContext:
@@ -371,27 +375,61 @@ class Bot:
         if not message.content.startswith(prefix):
             return
         
+        parser = naviparser.Parser(message.content[len(prefix):])
+
         try:
-            commands = naviutil.parse_command_string(message.content[len(prefix):])
-        
-            processing_output = None
-            i = 0
-            for command in commands:
-                i += 1
+            pipeline = parser.parse()
+            output = await self.handle_pipeline_execution(message, pipeline)
 
-                handler = self.commands.get(command['command'], None)
-
-                if handler:
-                    args = command['args']
-                    flags = command['flags']
-
-                    processing_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=processing_output, last_in_pipestream=i == len(commands))
+            if output:
+                if isinstance(output, str):
+                    await message.channel.send(embed=self.create_response_embed(message, description=output))
+                elif isinstance(output, discord.Embed):
+                    await message.channel.send(embed=output)
+                elif isinstance(output, Slider):
+                    await output.send()
+                elif isinstance(output, CommandError):
+                    await message.channel.send(embed=self.create_response_embed(message, f":warning: {output}"))
                 else:
-                    raise ValueError(f"O comando `{command['command']}` não existe, abortando...")
-        except (ValueError, PipeError) as e:
+                    logging.error(f'Pipeline output is invalid: {output}')
+        except (naviparser.ParserError, PipeError, BotError) as e:
             await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {e}"))
 
-    async def handle_command_execution(self, command, message, args, flags, received_pipe_data=None, last_in_pipestream=False):
+    async def handle_pipeline_execution(self, message, pipeline):
+        pipeline_output = ''
+        
+        for command in pipeline:
+            handler = self.commands.get(command.cmd, None)
+
+            if handler:
+                args = command.args
+                flags = command.flags
+
+                for c in range(len(args)):
+                    arg = args[c]
+                    # É uma string literal, veja se precisa processar algum comando antes.
+                    if isinstance(arg, list):
+                        for i in range(len(arg)):
+                            chunk = arg[i]
+                            # Temos uma outra PIPELINE, execute ela recursivamente antes para termos o resultado.
+                            if isinstance(chunk, list):
+                                arg[i] = await self.handle_pipeline_execution(message, chunk)
+
+                                if not isinstance(arg[i], str):
+                                    raise BotError(f"O comando `{command.cmd}` não retornou dados compatíveis com o operador PIPE...")
+
+                        args[c] = ''.join(arg)
+
+                if not isinstance(pipeline_output, str):
+                    raise BotError(f"O comando `{command.cmd}` não retornou dados compatíveis com o operador PIPE...")
+                
+                pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output)
+            else:
+                raise BotError(f"O comando `{command.cmd}` não existe, abortando...")
+
+        return pipeline_output
+
+    async def handle_command_execution(self, command, message, args, flags, received_pipe_data=''):
         output = None
         command = command.origin if isinstance(command, CommandAlias) else command
 
@@ -413,23 +451,7 @@ class Bot:
             except Exception as e:
                 logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
 
-        if output:
-            if isinstance(output, str):
-                if last_in_pipestream:
-                    await message.channel.send(embed=self.create_response_embed(message, description=output))
-                else:
-                    return output
-            elif isinstance(output, discord.Embed):
-                await message.channel.send(embed=output)
-            elif isinstance(output, Slider):
-                await output.send()
-            elif isinstance(output, CommandError):
-                await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {output}"))
-            else:
-                logging.error(f'Command {command.name} output is invalid: {output}')
-
-        if not last_in_pipestream and not isinstance(output, str):
-            raise PipeError(f"Abortando saída através do PIPE, o retorno do comando `{command.name}` não pode ser passado adiante.")
+        return output
 
     async def callable_update_playing(self, intervalcontext, kwargs):
         index = kwargs.get('index', 0)

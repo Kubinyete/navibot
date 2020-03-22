@@ -192,3 +192,13 @@ class CTime(navibot.BotCommand):
 
     async def run(self, message, args, flags):
         return f"{datetime.datetime.now().strftime('%H:%M:%S')}"
+
+class CDate(navibot.BotCommand):
+    def initialize(self):
+        self.name = 'date'
+        self.aliases = ['dt']
+        self.description = "Retorna a data atual."
+        self.usage = f"{self.name}"
+
+    async def run(self, message, args, flags):
+        return f"{datetime.datetime.now().strftime('%d/%m/%Y')}"
