@@ -416,12 +416,12 @@ class Bot:
                                 arg[i] = await self.handle_pipeline_execution(message, chunk)
 
                                 if not isinstance(arg[i], str):
-                                    raise BotError(f"O comando `{command.cmd}` não retornou dados compatíveis com o operador PIPE...")
+                                    raise BotError(f"O comando `{chunk[0].cmd}` não retornou dados compatíveis para utilizar de argumento...")
 
                         args[c] = ''.join(arg)
 
                 if not isinstance(pipeline_output, str):
-                    raise BotError(f"O comando `{command.cmd}` não retornou dados compatíveis com o operador PIPE...")
+                    raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
                 
                 pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output)
             else:
@@ -430,6 +430,11 @@ class Bot:
         return pipeline_output
 
     async def handle_command_execution(self, command, message, args, flags, received_pipe_data=''):
+        # @TODO: Adicionar verificador de menções, pois o registro de menções é feito sobre todas as menções na mensagem completa,
+        # porém, cada comando deveria somente ter acesso a lista de menções que lhe foi passada
+        # Ex: "";;echo @Piratex "{av @Navi --url --size=32}"
+        # o exemplo acima fará com que o comando avatar imprima o URL do avatar de @Piratex e não de @Navi
+        
         output = None
         command = command.origin if isinstance(command, CommandAlias) else command
 

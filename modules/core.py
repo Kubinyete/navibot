@@ -1,3 +1,4 @@
+import discord
 import random
 import inspect
 import asyncio
@@ -74,19 +75,34 @@ class CAvatar(navibot.BotCommand):
         self.name = "avatar"
         self.aliases = ['av']
         self.description = "Retorna o avatar do indivíduo mencionado."
-        self.usage = f"{self.name} @Usuario"
+        self.usage = f"{self.name} @Usuario [--url] [--size=256]"
 
     async def run(self, message, args, flags):
         target = message.mentions[0] if message.mentions else None
 
         if not target:
-            #raise navibot.CommandError("É preciso mencionar como argumento o usuário.")
             return self.get_usage_embed(message)
 
-        embed = self.create_response_embed(message) 
-        embed.title = f"Avatar de {target.name}"
-        embed.set_image(url=target.avatar_url_as(size=256))
-        return embed
+        try:
+            size = int(flags.get('size', 256))
+            size = int(math.pow(2, math.floor(math.log2(size))))
+
+            assert size >= 16 and size <= 4096
+        except ValueError:
+            raise navibot.CommandError(F"É preciso informar números inteiros válidos.")
+        except AssertionError:
+            raise navibot.CommandError("O argumento `--size` deve estar entre 16 e 4096 e ser uma potência de 2 (Ex: 32, 64, 128...).")
+
+        out = None
+
+        if "url" in flags:
+            out = str(target.avatar_url_as(size=size))
+        else:
+            out = self.create_response_embed(message) 
+            out.title = f"Avatar de {target.name}"
+            out.set_image(url=target.avatar_url_as(size=256))
+        
+        return out
 
 class CRemind(navibot.BotCommand):
     def initialize(self):
