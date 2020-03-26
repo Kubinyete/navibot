@@ -17,8 +17,8 @@ class Gamemode(Enum):
         return getattr(Gamemode, name)
 
 class OsuApi:
-    def __init__(self, key):
-        self.session = aiohttp.ClientSession()
+    def __init__(self, key, aiohttpSession=aiohttp.ClientSession()):
+        self.session = aiohttpSession
         self.domain = r'https://osu.ppy.sh'
         self.key = key
 

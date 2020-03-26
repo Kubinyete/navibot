@@ -1,8 +1,8 @@
 import aiohttp
 
 class YandereApi:
-    def __init__(self):
-        self.session = aiohttp.ClientSession()
+    def __init__(self, aiohttpSession=aiohttp.ClientSession()):
+        self.session = aiohttpSession
         self.domain = r'https://yande.re'
 
     @staticmethod
