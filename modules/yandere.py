@@ -1,17 +1,25 @@
 import navibot
-import naviutil
 import logging
 import math
+
+from navibot.client import BotCommand, Slider
+from navibot.errors import CommandError
+from navibot.util import bytes_string
+
 from libs.yandere import YandereApi
 
-class CYandere(navibot.BotCommand):
-    def initialize(self):
-        self.name = "yandere"
-        self.aliases = ['ynd']
-        self.description = "Exibe um Slider de uma ou mais imagens retornadas pela API do site yande.re de acordo com as tags informadas por argumento."
-        self.usage = f"{self.name} [--post] [tag1] [tagN]... [--page=1] | --tag [tagname1...]"
+class CYandere(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "yandere",
+            aliases = ['ynd'],
+            description = "Exibe um Slider de uma ou mais imagens retornadas pela API do site yande.re de acordo com as tags informadas por argumento.",
+            usage = "{name} [--post] [tag1] [tagN]... [--page=1] | --tag [tagname1...]"
+        )
 
         self.api = YandereApi()
+        
         # @TODO: Solução temporária até adicionarmos o contexto de variáveis de uma Guild
         self.allowed_ratings = ('s')
         self.tags_per_embed = 20
@@ -29,7 +37,7 @@ class CYandere(navibot.BotCommand):
             if type(page) is str:
                 page = int(page)
         except ValueError:
-            raise navibot.CommandError("O argumento `--page` não é um número válido.")
+            raise CommandError("O argumento `--page` não é um número válido.")
 
         items = []
 
@@ -63,8 +71,8 @@ class CYandere(navibot.BotCommand):
                     embed = self.create_response_embed(message)
                     
                     description = f"`{post['tags']}`\n"
-                    description += f":information_source: Ver [amostra]({post['sample_url']}) ({post['sample_width']}x{post['sample_height']}) ({naviutil.bytes_string(post['sample_file_size'])})\n"
-                    description += f":information_source: Ver [original]({post['file_url']}) ({post['width']}x{post['height']}) ({naviutil.bytes_string(post['file_size'])})\n"
+                    description += f":information_source: Ver [amostra]({post['sample_url']}) ({post['sample_width']}x{post['sample_height']}) ({bytes_string(post['sample_file_size'])})\n"
+                    description += f":information_source: Ver [original]({post['file_url']}) ({post['width']}x{post['height']}) ({bytes_string(post['file_size'])})\n"
 
                     if self.allowed_ratings:
                         description += f":warning: Algumas imagens podem não estar disponíveis devido à restrições de conteúdo (`help nsfw`)."
@@ -76,7 +84,7 @@ class CYandere(navibot.BotCommand):
 
                     items.append(embed)
 
-        return navibot.Slider(
+        return Slider(
             self.bot.client, 
             message,
             items

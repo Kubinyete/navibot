@@ -2,16 +2,26 @@ import navibot
 import logging
 import math
 import time
+
+from navibot.client import BotCommand, Slider
+from navibot.errors import CommandError
+
 from libs.osu import OsuApi, Gamemode
 
-class COsu(navibot.BotCommand):
-    def initialize(self):
-        self.name = "osu"
-        self.aliases = ['os']
-        self.description = "Exibe um Slider com informações sobre o perfil do usuário e as suas melhores performances."
-        self.usage = f"{self.name} username [--mode=osu|taiko|ctb|mania]"
+class COsu(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "osu",
+            aliases = ['os'],
+            description = "Exibe um Slider com informações sobre o perfil do usuário e as suas melhores performances.",
+            usage = "{name} username [--mode=osu|taiko|ctb|mania]"
+        )
 
-        self.api = OsuApi(self.bot.config.get('modules.osu.key', ''))
+        self.api = OsuApi(
+            self.bot.config.get('modules.osu.key', '')
+        )
+
         self.assets_domain = r"https://a.ppy.sh"
         self.public_repo = self.bot.config.get('global.public_repo', '')
         self.max_best_scores = 10
@@ -26,7 +36,7 @@ class COsu(navibot.BotCommand):
         try:
             mode = Gamemode.from_gamemode_string(flags.get('mode', 'osu').upper())
         except AttributeError:
-            raise navibot.CommandError("O argumento `--mode` não é um modo de jogo válido.")
+            raise CommandError("O argumento `--mode` não é um modo de jogo válido.")
 
         user = await self.api.fetch_user(inputstr, mode=mode)
 
@@ -72,7 +82,7 @@ class COsu(navibot.BotCommand):
 
                 items.append(embed)
 
-            return navibot.Slider(
+            return Slider(
                 self.bot.client, 
                 message,
                 items

@@ -1,3 +1,4 @@
+# Client module
 import discord
 import asyncio
 import logging
@@ -7,18 +8,347 @@ import importlib
 import inspect
 import time
 import traceback
-import naviutil
-import naviparser
+
 from enum import Enum, auto
 
-class CommandError(Exception):
-    pass
+from navibot.parser import Parser
+from navibot.util import is_instance, is_subclass
+from navibot.errors import *
 
-class PipeError(Exception):
-    pass
+class PermissionLevel(Enum):
+    NONE = auto()
+    GUILD_MOD = auto()
+    GUILD_ADMIN = auto()
+    GUILD_OWNER = auto()
+    BOT_OWNER = auto()
 
-class BotError(Exception):
-    pass
+class Command:
+    def __init__(self, bot):
+        assert isinstance(bot, Bot)
+
+        self.bot = bot
+        self.name = type(self).__name__.lower()
+        self.description = 'Descrição não disponível.'
+        self.usage = '{name}'
+        self.aliases = []
+
+    def update_info(self, new_info: dict):
+        for key, value in new_info.items():
+            currattr = getattr(self, key, None)
+            if currattr is not None:
+                if isinstance(value, type(currattr)):
+                    setattr(self, key, value)
+                else:
+                    raise TypeError("É preciso informar um atributo básico com o mesmo tipo.")
+
+    async def run(self, args, flags):
+        raise NotImplementedError()
+
+class BotCommand(Command):
+    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, enable_usermap: bool=False, **kwargs):
+        super().__init__(bot)
+
+        self.update_info(kwargs)
+
+        self.permissionlevel = permissionlevel
+        self.enable_usermap = enable_usermap
+        if self.enable_usermap:
+            self.usermap = dict()
+
+    def create_response_embed(self, message, description=''):
+        return self.bot.create_response_embed(message, description)
+
+    def get_usage_embed(self, message):
+        text = f"{self.description}\n\n`{self.usage.format(name=self.name)}`"
+        embed = self.create_response_embed(message, text)
+        embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
+        return embed
+
+    def get_user_storage(self, author):
+        assert self.enable_usermap
+
+        try:
+            return self.usermap[author.id]
+        except KeyError:
+            self.usermap[author.id] = list()
+            return self.usermap[author.id]
+
+    async def run(self, message, args, flags):
+        raise NotImplementedError()
+
+class CommandAlias:
+    def __init__(self, origin):
+        self.origin = origin
+
+class Client(discord.Client):
+    def __init__(self):
+        super().__init__()
+        
+        self.listeners = {}
+
+    async def on_message(self, message):
+        await self.dispatch_event('message', message=message)
+
+    async def on_ready(self):
+        await self.dispatch_event('ready')
+
+    async def on_reaction_add(self, reaction, user):
+        await self.dispatch_event('reaction_add', reaction=reaction, user=user)
+
+    def listen(self, token):
+        self.run(token)
+
+    def register_event(self, eventname, coroutinefunc, name=None):
+        assert asyncio.iscoroutinefunction(coroutinefunc)
+
+        eid = coroutinefunc.__name__ if name is None else name
+
+        if not eventname in self.listeners:
+            self.listeners[eventname] = dict()
+
+        self.listeners[eventname][eid] = coroutinefunc
+        
+        return eid
+
+    def remove_event(self, eventname, eid):
+        del self.listeners[eventname][eid]
+
+    async def dispatch_event(self, eventname, **kwargs):
+        if not eventname in self.listeners:
+            return
+
+        for eid, coroutine in self.listeners[eventname].items():
+            #logging.info(f"Dispatching event {eventname}, awaiting listener {eid} ({coroutine.__name__})")
+            await coroutine(kwargs)
+
+class Config:
+    def __init__(self, configfile):
+        self.kvalues = {}
+        self.path = configfile
+
+    def load(self):
+        with open(self.path, 'r', encoding='utf-8') as f:
+            self.kvalues = json.loads(''.join(f.readlines()))
+
+    def get(self, keystr, default=None):
+        keys = keystr.split('.')
+        curr = self.kvalues
+
+        if len(keys) <= 0:
+            return
+
+        try:
+            for i in keys:
+                curr = curr[i]
+        except KeyError:
+            return default
+
+        return curr
+
+class Bot:
+    def __init__(self, path=None, logfile=None, loglevel=logging.DEBUG):
+        logging.basicConfig(
+            filename=logfile, 
+            format="[%(asctime)s] <%(levelname)s> %(message)s", 
+            datefmt="%d/%m/%Y %H:%M:%S", 
+            level=loglevel
+        )
+
+        self.curr_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if not path else path
+        self.playing_interval = None
+
+        self.config = Config(
+            f'{self.curr_path}/release/config.json'
+        )
+
+        self.config.load()
+        
+        self.client = Client()
+        self.client.register_event('message', self.receive_message)
+        self.client.register_event('ready', self.receive_ready)
+
+        self.commands = {}
+        self.load_modules(f'{self.curr_path}/modules')
+
+    def load_modules(self, dirpath):
+        with os.scandir(dirpath) as iterator:
+            for file in iterator:
+                if file.name.endswith('.py') and file.is_file():
+                    mod = importlib.import_module(f"{dirpath[len(os.path.dirname(dirpath)) + 1:].replace('/', '.')}.{file.name[:-3]}")
+                    self.load_commands_from_module(mod)
+
+    def load_commands_from_module(self, mod):
+        logging.info(f"Attempting to load commands from module: {mod}")
+        
+        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and is_subclass(x, BotCommand) and x != BotCommand):
+            cmd = obj[1](self)
+
+            assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
+
+            self.commands[cmd.name] = cmd
+
+            for alias in cmd.aliases:
+                self.commands[alias] = CommandAlias(cmd)
+
+            logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+
+    def listen(self):
+        self.client.listen(self.config.get('global.token'))
+
+    def create_response_embed(self, message, description=""):
+        return discord.Embed(description=description, color=discord.Color.magenta()).set_footer(
+            text=message.author.name, 
+            icon_url=message.author.avatar_url_as(size=32)
+        )
+
+    async def set_playing_game(self, playingstr, status=None, afk=False):
+        await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
+
+    async def receive_ready(self, kwargs):
+        logging.info(f"Successfully logged in")
+
+        if self.playing_interval is None:
+            self.playing_interval = IntervalContext(
+                self.config.get('global.playing_delay', 60),
+                self.callable_update_playing
+            )
+
+            self.playing_interval.create_task()
+
+    async def receive_message(self, kwargs):
+        message = kwargs.get('message', None)
+
+        if message.author == self.client.user or message.author.bot:
+            return
+
+        prefix = self.config.get('global.prefix', ';;')
+
+        if not message.content.startswith(prefix):
+            return
+        
+        parser = Parser(message.content[len(prefix):])
+
+        try:
+            pipeline = parser.parse()
+            output = await self.handle_pipeline_execution(message, pipeline)
+
+            if output:
+                if isinstance(output, str):
+                    await message.channel.send(embed=self.create_response_embed(message, description=output))
+                elif isinstance(output, discord.Embed):
+                    await message.channel.send(embed=output)
+                elif isinstance(output, Slider):
+                    await output.send()
+                elif isinstance(output, CommandError):
+                    await message.channel.send(embed=self.create_response_embed(message, f":warning: {output}"))
+                else:
+                    logging.error(f'Pipeline output is invalid: {output}')
+        except (ParserError, BotError, PermissionLevelError) as e:
+            await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {e}"))
+
+    async def has_permission_level(self, command, channel, author):
+        if command.permissionlevel is PermissionLevel.NONE:
+            return True
+        elif command.permissionlevel is PermissionLevel.BOT_OWNER:
+            return author.id in self.config.get('global.owner_ids', [])
+        else:
+            currlevel = None
+            
+            if isinstance(channel, discord.TextChannel):
+                permissions = channel.permissions_for(author)
+
+                if permissions.kick_members or permissions.ban_members:
+                    currlevel = PermissionLevel.GUILD_MOD
+                
+                if permissions.administrator:
+                    currlevel = PermissionLevel.GUILD_ADMIN
+
+                if channel.guild.owner == author:
+                    currlevel = PermissionLevel.GUILD_OWNER
+            
+            return currlevel.value >= command.permissionlevel.value if currlevel else False
+
+    async def handle_pipeline_execution(self, message, pipeline):
+        pipeline_output = ''
+        
+        for command in pipeline:
+            handler = self.commands.get(command.cmd, None)
+
+            if handler:
+                handler = handler.origin if isinstance(handler, CommandAlias) else handler
+
+                if not await self.has_permission_level(handler, message.channel, message.author):
+                    raise PermissionLevelError(f"Você não possui um nível de permissão igual ou superior à `{handler.permissionlevel.name}`")
+
+                args = command.args
+                flags = command.flags
+
+                for c in range(len(args)):
+                    arg = args[c]
+                    # É uma string literal, veja se precisa processar algum comando antes.
+                    if isinstance(arg, list):
+                        for i in range(len(arg)):
+                            chunk = arg[i]
+                            # Temos uma outra PIPELINE, execute ela recursivamente antes para termos o resultado.
+                            if isinstance(chunk, list):
+                                arg[i] = await self.handle_pipeline_execution(message, chunk)
+
+                                if not isinstance(arg[i], str):
+                                    raise BotError(f"O comando `{chunk[0].cmd}` não retornou dados compatíveis para utilizar de argumento...")
+
+                        args[c] = ''.join(arg)
+
+                if not isinstance(pipeline_output, str):
+                    raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
+                
+                pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output)
+            else:
+                raise BotError(f"O comando `{command.cmd}` não existe, abortando...")
+
+        return pipeline_output
+
+    async def handle_command_execution(self, command, message, args, flags, received_pipe_data=''):
+        # @TODO: Adicionar verificador de menções, pois o registro de menções é feito sobre todas as menções na mensagem completa,
+        # porém, cada comando deveria somente ter acesso a lista de menções que lhe foi passada
+        # Ex: "";;echo @Piratex "{av @Navi --url --size=32}"
+        # o exemplo acima fará com que o comando avatar imprima o URL do avatar de @Piratex e não de @Navi
+        
+        assert is_instance(command, BotCommand)
+        
+        logging.info(f'Handling execution of {command.name}: {command}')
+        output = None
+
+        if 'h' in flags or 'help' in flags:
+            output = command.get_usage_embed(message)
+        else:
+            try:
+                if received_pipe_data:
+                    args.append(received_pipe_data)
+
+                output = await command.run(message, args, flags)
+            except CommandError as e:
+                logging.warn(f'Command {command.name} threw an error: {e}')
+                output = e
+            except Exception as e:
+                logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
+
+        return output
+
+    async def callable_update_playing(self, intervalcontext, kwargs):
+        index = kwargs.get('index', 0)
+        playing_list = self.config.get('global.playing', None)
+
+        if not playing_list or len(playing_list) == 1:
+            intervalcontext.safe_halt = True
+
+            if playing_list:
+                await self.set_playing_game(playing_list[index])
+        else:
+            if index >= len(playing_list):
+                index = 0
+
+            await self.set_playing_game(playing_list[index])
+            kwargs['index'] = index + 1
 
 class TimeoutContext:
     def __init__(self, waitfor, callable, callback=None, **kwargs):
@@ -172,304 +502,3 @@ class Slider:
 
             if not self.caught_exception:
                 self.client.remove_event("reaction_add", self.registered_event_id)
-
-class Command:
-    def __init__(self, bot):
-        self.bot = bot
-        self.name = None
-        self.description = None
-        self.usage = None
-
-    def initialize(self):
-        raise NotImplementedError()
-
-    async def run(self, args, flags):
-        raise NotImplementedError()
-
-class BotCommand(Command):
-    def __init__(self, bot):
-        super().__init__(bot)
-        
-        self.name = type(self).__name__.lower()
-        self.aliases = []
-        self.description = 'Descrição não disponível.'
-        self.usage = None
-        self.enable_usermap = False
-
-        self.initialize()
-        
-        if not self.usage:
-            self.usage = f"{self.name}"
-
-        if self.enable_usermap:
-            self.usermap = {}
-
-    def create_response_embed(self, message, description=''):
-        return self.bot.create_response_embed(message, description)
-
-    def get_usage_embed(self, message):
-        text = f"{self.description}\n\n`{self.usage}`"
-        embed = self.create_response_embed(message, text)
-        embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
-        return embed
-
-    def get_user_storage(self, author):
-        assert self.enable_usermap
-
-        try:
-            return self.usermap[author.id]
-        except KeyError:
-            self.usermap[author.id] = list()
-            return self.usermap[author.id]
-
-    def initialize(self):
-        pass
-
-    async def run(self, message, args, flags):
-        raise NotImplementedError()
-
-class CommandAlias:
-    def __init__(self, origin):
-        self.origin = origin
-
-class Client(discord.Client):
-    def __init__(self):
-        super().__init__()
-        
-        self.listeners = {}
-
-    async def on_message(self, message):
-        await self.dispatch_event('message', message=message)
-
-    async def on_ready(self):
-        await self.dispatch_event('ready')
-
-    async def on_reaction_add(self, reaction, user):
-        await self.dispatch_event('reaction_add', reaction=reaction, user=user)
-
-    def listen(self, token):
-        self.run(token)
-
-    def register_event(self, eventname, coroutinefunc, name=None):
-        assert asyncio.iscoroutinefunction(coroutinefunc)
-
-        eid = coroutinefunc.__name__ if name is None else name
-
-        if not eventname in self.listeners:
-            self.listeners[eventname] = dict()
-
-        self.listeners[eventname][eid] = coroutinefunc
-        
-        return eid
-
-    def remove_event(self, eventname, eid):
-        del self.listeners[eventname][eid]
-
-    async def dispatch_event(self, eventname, **kwargs):
-        if not eventname in self.listeners:
-            return
-
-        for eid, coroutine in self.listeners[eventname].items():
-            #logging.info(f"Dispatching event {eventname}, awaiting listener {eid} ({coroutine.__name__})")
-            await coroutine(kwargs)
-
-class Config:
-    def __init__(self, configfile):
-        self.kvalues = {}
-        self.path = configfile
-
-    def load(self):
-        with open(self.path, 'r', encoding='utf-8') as f:
-            self.kvalues = json.loads(''.join(f.readlines()))
-
-    def get(self, keystr, default=None):
-        keys = keystr.split('.')
-        curr = self.kvalues
-
-        if len(keys) <= 0:
-            return
-
-        try:
-            for i in keys:
-                curr = curr[i]
-        except KeyError:
-            return default
-
-        return curr
-
-class Bot:
-    def __init__(self, configfile, logfile=None, loglevel=logging.DEBUG):
-        logging.basicConfig(
-            filename=logfile, 
-            format="[%(asctime)s] <%(levelname)s> %(message)s", 
-            datefmt="%d/%m/%Y %H:%M:%S", 
-            level=loglevel
-        )
-
-        self.curr_path = os.path.dirname(os.path.abspath(__file__))
-        self.playing_interval = None
-
-        self.config = Config(configfile)
-        self.config.load()
-        
-        self.client = Client()
-        self.client.register_event('message', self.receive_message)
-        self.client.register_event('ready', self.receive_ready)
-
-        self.commands = {}
-        self.load_modules(f'{self.curr_path}/modules')
-
-    def load_modules(self, dirpath):
-        with os.scandir(dirpath) as iterator:
-            for file in iterator:
-                if file.name.endswith('.py') and file.is_file():
-                    mod = importlib.import_module(f"{dirpath[len(os.path.dirname(dirpath)) + 1:].replace('/', '.')}.{file.name[:-3]}")
-                    self.load_commands_from_module(mod)
-
-    def load_commands_from_module(self, mod):
-        logging.info(f"Attempting to load commands from module: {mod}")
-        
-        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and naviutil.is_subclass(x, BotCommand)):
-            cmd = obj[1](self)
-
-            assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
-
-            self.commands[cmd.name] = cmd
-
-            for alias in cmd.aliases:
-                self.commands[alias] = CommandAlias(cmd)
-
-            logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
-
-    def listen(self):
-        self.client.listen(self.config.get('global.token'))
-
-    def create_response_embed(self, message, description=""):
-        return discord.Embed(description=description, color=discord.Color.magenta()).set_footer(
-            text=message.author.name, 
-            icon_url=message.author.avatar_url_as(size=32)
-        )
-
-    async def set_playing_game(self, playingstr, status=None, afk=False):
-        await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
-
-    async def receive_ready(self, kwargs):
-        logging.info(f"Successfully logged in")
-
-        if self.playing_interval is None:
-            self.playing_interval = IntervalContext(
-                self.config.get('global.playing_delay', 60),
-                self.callable_update_playing
-            )
-
-            self.playing_interval.create_task()
-
-    async def receive_message(self, kwargs):
-        message = kwargs.get('message', None)
-
-        if message.author == self.client.user or message.author.bot:
-            return
-
-        prefix = self.config.get('global.prefix', ';;')
-
-        if not message.content.startswith(prefix):
-            return
-        
-        parser = naviparser.Parser(message.content[len(prefix):])
-
-        try:
-            pipeline = parser.parse()
-            output = await self.handle_pipeline_execution(message, pipeline)
-
-            if output:
-                if isinstance(output, str):
-                    await message.channel.send(embed=self.create_response_embed(message, description=output))
-                elif isinstance(output, discord.Embed):
-                    await message.channel.send(embed=output)
-                elif isinstance(output, Slider):
-                    await output.send()
-                elif isinstance(output, CommandError):
-                    await message.channel.send(embed=self.create_response_embed(message, f":warning: {output}"))
-                else:
-                    logging.error(f'Pipeline output is invalid: {output}')
-        except (naviparser.ParserError, PipeError, BotError) as e:
-            await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {e}"))
-
-    async def handle_pipeline_execution(self, message, pipeline):
-        pipeline_output = ''
-        
-        for command in pipeline:
-            handler = self.commands.get(command.cmd, None)
-
-            if handler:
-                args = command.args
-                flags = command.flags
-
-                for c in range(len(args)):
-                    arg = args[c]
-                    # É uma string literal, veja se precisa processar algum comando antes.
-                    if isinstance(arg, list):
-                        for i in range(len(arg)):
-                            chunk = arg[i]
-                            # Temos uma outra PIPELINE, execute ela recursivamente antes para termos o resultado.
-                            if isinstance(chunk, list):
-                                arg[i] = await self.handle_pipeline_execution(message, chunk)
-
-                                if not isinstance(arg[i], str):
-                                    raise BotError(f"O comando `{chunk[0].cmd}` não retornou dados compatíveis para utilizar de argumento...")
-
-                        args[c] = ''.join(arg)
-
-                if not isinstance(pipeline_output, str):
-                    raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
-                
-                pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output)
-            else:
-                raise BotError(f"O comando `{command.cmd}` não existe, abortando...")
-
-        return pipeline_output
-
-    async def handle_command_execution(self, command, message, args, flags, received_pipe_data=''):
-        # @TODO: Adicionar verificador de menções, pois o registro de menções é feito sobre todas as menções na mensagem completa,
-        # porém, cada comando deveria somente ter acesso a lista de menções que lhe foi passada
-        # Ex: "";;echo @Piratex "{av @Navi --url --size=32}"
-        # o exemplo acima fará com que o comando avatar imprima o URL do avatar de @Piratex e não de @Navi
-        
-        output = None
-        command = command.origin if isinstance(command, CommandAlias) else command
-
-        logging.info(f'Handling execution of {command.name}: {command}')
-        
-        assert naviutil.is_instance(command, BotCommand)
-
-        if 'h' in flags or 'help' in flags:
-            output = command.get_usage_embed(message)
-        else:
-            try:
-                if received_pipe_data:
-                    args.append(received_pipe_data)
-
-                output = await command.run(message, args, flags)
-            except CommandError as e:
-                logging.warn(f'Command {command.name} threw an error: {e}')
-                output = e
-            except Exception as e:
-                logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
-
-        return output
-
-    async def callable_update_playing(self, intervalcontext, kwargs):
-        index = kwargs.get('index', 0)
-        playing_list = self.config.get('global.playing', None)
-
-        if not playing_list or len(playing_list) == 1:
-            intervalcontext.safe_halt = True
-
-            if playing_list:
-                await self.set_playing_game(playing_list[index])
-        else:
-            if index >= len(playing_list):
-                index = 0
-
-            await self.set_playing_game(playing_list[index])
-            kwargs['index'] = index + 1

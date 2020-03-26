@@ -1,6 +1,7 @@
 import sys
 import logging
 import io
+from navibot.errors import ParserError
 
 PARSER_STRING_LITERAL = '"'
 PARSER_STRING_ESCAPE = '\\'
@@ -28,11 +29,6 @@ ESCAPE_MAP = {
     PARSER_STRING_SUBCOMMAND_START: PARSER_STRING_SUBCOMMAND_START,
     PARSER_STRING_SUBCOMMAND_END: PARSER_STRING_SUBCOMMAND_END
 }
-
-DEBUG_TAB = ' -- '
-
-class ParserError(Exception):
-    pass
 
 class CommandRequest:
     def __init__(self, cmd=''):
@@ -240,24 +236,28 @@ class Parser:
 
         return Parser(subcommand_input).parse()
 
-def print_pipeline(pipeline, lvl=0):
-    for cmdreq in pipeline:
-        print(f"{DEBUG_TAB * lvl}Comando {cmdreq.cmd}:")
-        print(f"{DEBUG_TAB * lvl}Args:")
-
-        for argument in cmdreq.args:
-            if isinstance(argument, str):
-                print(f"{DEBUG_TAB * (lvl + 1)}{argument}")
-            else:
-                for chunk in argument:
-                    if isinstance(chunk, list):
-                        print_pipeline(chunk, lvl=lvl + 2)
-                    else:
-                        print(f"{DEBUG_TAB * (lvl + 1)}{chunk}")
-
-    print(f"{DEBUG_TAB * lvl}---")
-
 if __name__ == "__main__":
+    DEBUG_TAB = '\t'
+
+    def debug_print_pipeline(pipeline, lvl=0):
+        for cmdreq in pipeline:
+            print(f"{DEBUG_TAB * lvl}Comando {cmdreq.cmd}:")
+            print(f"{DEBUG_TAB * lvl}Args:")
+
+            for argument in cmdreq.args:
+                if isinstance(argument, str):
+                    print(f"{DEBUG_TAB * (lvl + 1)}{argument}")
+                else:
+                    for chunk in argument:
+                        if isinstance(chunk, list):
+                            debug_print_pipeline(chunk, lvl=lvl + 2)
+                        else:
+                            print(f"{DEBUG_TAB * (lvl + 1)}{chunk}")
+
+        print(f"{DEBUG_TAB * lvl}---")
+
     p = Parser(sys.argv[1])
     pipeline = p.parse()
-    print_pipeline(pipeline)
+
+    # DEBUG
+    debug_print_pipeline(pipeline)
