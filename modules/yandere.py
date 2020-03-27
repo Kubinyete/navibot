@@ -36,6 +36,9 @@ class CYandere(BotCommand):
             
             if type(page) is str:
                 page = int(page)
+                
+            if page <= 0:
+                page = 1
         except ValueError:
             raise CommandError("O argumento `--page` não é um número válido.")
 
