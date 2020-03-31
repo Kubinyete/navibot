@@ -4,6 +4,7 @@ class ErrorCollection(Exception):
     def __init__(self, errors):
         self.errors = errors
 
+# @TODO: Fazer com que APIs retornem seus próprios objetos
 class AniListApi:
     def __init__(self, aiohttpSession=aiohttp.ClientSession()):
         self.session = aiohttpSession

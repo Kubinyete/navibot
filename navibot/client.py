@@ -8,12 +8,15 @@ import importlib
 import inspect
 import time
 import traceback
+import databases
 
 from enum import Enum, auto
 
 from navibot.parser import Parser
 from navibot.util import is_instance, is_subclass
 from navibot.errors import *
+from navibot.database.dal import GuildVariableDAL
+from navibot.database.models import GuildVariable
 
 class PermissionLevel(Enum):
     NONE = auto()
@@ -73,12 +76,73 @@ class BotCommand(Command):
             self.usermap[author.id] = list()
             return self.usermap[author.id]
 
+    def get_guild_settings_manager(self):
+        return self.bot.guildsettings
+
     async def run(self, message, args, flags):
         raise NotImplementedError()
 
 class CommandAlias:
-    def __init__(self, origin):
+    def __init__(self, origin: Command):
         self.origin = origin
+
+class GuildSettingsManager:
+    def __init__(self, bot, defaultvalues={}):
+        self.bot = bot
+        self.defaultvalues = defaultvalues
+        self.guildmap = {}
+
+    async def get_database_connection(self):
+        return await self.bot.get_database_connection()
+
+    async def initialize_guild_variables(self, guildid):
+        if not guildid in self.guildmap:
+            self.guildmap[guildid] = dict(self.defaultvalues)
+
+            for key, value in self.guildmap[guildid].items():
+                self.guildmap[guildid][key] = GuildVariable(
+                    guildid,
+                    key,
+                    value,
+                    None
+                )
+
+            dal = GuildVariableDAL(await self.get_database_connection())
+            
+            for variable in await dal.get_all_variables(guildid):
+                self.guildmap[variable.guildid][variable.key] = variable
+
+    async def get_guild_variable(self, guildid, key, default=None):
+        await self.initialize_guild_variables(guildid)
+        
+        return self.guildmap[guildid].get(key, default)
+
+    async def get_guild_variables(self, guildid):
+        await self.initialize_guild_variables(guildid)
+        
+        return self.guildmap[guildid]
+
+    async def update_guild_variable(self, variable):
+        dal = GuildVariableDAL(await self.get_database_connection())
+
+        ok = await dal.update_variable(variable)
+
+        if not ok:
+            # Não existe ainda, crie
+            return await dal.create_variable(variable)
+        else:
+            return ok
+
+    async def remove_guild_variable(self, variable):
+        # Isso vai voltar para o valor padrão
+        dal = GuildVariableDAL(await self.get_database_connection())
+
+        if await dal.remove_variable(variable):
+            variable.set_value(self.defaultvalues[variable.key])
+
+            return True
+
+        return False
 
 class Client(discord.Client):
     def __init__(self):
@@ -118,11 +182,10 @@ class Client(discord.Client):
             return
 
         for eid, coroutine in self.listeners[eventname].items():
-            #logging.info(f"Dispatching event {eventname}, awaiting listener {eid} ({coroutine.__name__})")
             await coroutine(kwargs)
 
 class Config:
-    def __init__(self, configfile):
+    def __init__(self, configfile: str):
         self.kvalues = {}
         self.path = configfile
 
@@ -130,7 +193,7 @@ class Config:
         with open(self.path, 'r', encoding='utf-8') as f:
             self.kvalues = json.loads(''.join(f.readlines()))
 
-    def get(self, keystr, default=None):
+    def get(self, keystr:str, default=None):
         keys = keystr.split('.')
         curr = self.kvalues
 
@@ -169,6 +232,25 @@ class Bot:
 
         self.commands = {}
         self.load_modules(f'{self.curr_path}/modules')
+        
+        self.active_database = None
+
+        self.guildsettings = GuildSettingsManager(self, defaultvalues=self.config.get('guild_settings'))
+
+    async def get_database_connection(self):
+        if not self.active_database:
+            self.active_database = databases.Database(
+                self.config.get('database.connection_string')
+            )
+
+        if not self.active_database.is_connected:
+            try:
+                await self.active_database.connect()
+            except Exception as e:
+                logging.error(f'Connecting to the database failed: {e}')
+                raise BotError('Não foi possível conectar-se à base de dados.')
+        
+        return self.active_database
 
     def load_modules(self, dirpath):
         with os.scandir(dirpath) as iterator:
@@ -185,10 +267,10 @@ class Bot:
 
             assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
 
-            self.commands[cmd.name] = cmd
+            self.commands[cmd.name.lower()] = cmd
 
             for alias in cmd.aliases:
-                self.commands[alias] = CommandAlias(cmd)
+                self.commands[alias.lower()] = CommandAlias(cmd)
 
             logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
 
@@ -243,8 +325,8 @@ class Bot:
                     await message.channel.send(embed=self.create_response_embed(message, f":warning: {output}"))
                 else:
                     logging.error(f'Pipeline output is invalid: {output}')
-        except (ParserError, BotError, PermissionLevelError) as e:
-            await message.channel.send(embed=self.create_response_embed(message, f":red_circle: {e}"))
+        except (ParserError, PermissionLevelError, BotError) as e:
+            await message.channel.send(embed=self.create_response_embed(message, f":red_circle: **{type(e).__name__}** : {e}"))
 
     async def has_permission_level(self, command, channel, author):
         if command.permissionlevel is PermissionLevel.NONE:
@@ -272,7 +354,7 @@ class Bot:
         pipeline_output = ''
         
         for command in pipeline:
-            handler = self.commands.get(command.cmd, None)
+            handler = self.commands.get(command.cmd.lower(), None)
 
             if handler:
                 handler = handler.origin if isinstance(handler, CommandAlias) else handler

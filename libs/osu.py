@@ -16,6 +16,7 @@ class Gamemode(Enum):
     def from_gamemode_string(name):
         return getattr(Gamemode, name)
 
+# @TODO: Fazer com que APIs retornem seus próprios objetos
 class OsuApi:
     def __init__(self, key, aiohttpSession=aiohttp.ClientSession()):
         self.session = aiohttpSession

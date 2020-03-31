@@ -401,3 +401,54 @@ class CChoice(BotCommand):
             return self.get_usage_embed(message)
 
         return random.choice(args)
+
+class CGuildVariables(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = 'guildvars',
+            aliases = ['gv', 'gvars'],
+            description = "Gerencia as variáveis da Guild atual.",
+            usage = "{name} variavel [novo valor] [--list]",
+            # Nível de permissão temporário
+            permissionlevel=PermissionLevel.BOT_OWNER
+        )
+
+    async def run(self, message, args, flags):
+        if not isinstance(message.channel, discord.TextChannel):
+            raise CommandError('Comando indisponível fora do contexto de uma Guild.')
+
+        gsm = self.get_guild_settings_manager()
+        gvars = await gsm.get_guild_variables(message.channel.guild.id)
+
+        if 'list' in flags:
+            text = ''
+            for key, value in gvars.items():
+                text += f'**{value.valuetype.name.lower()}**:`{key}` = `{value.value}`\n'
+
+            return text
+        else:
+            if args:
+                try:
+                    expected_variable = gvars[args[0]]
+                except KeyError:
+                    raise CommandError(f'A variável `{args[0]}` não existe no contexto da Guild atual.')
+
+                if len(args) > 1:
+                    new_value = ' '.join(args[1:])
+                    prev_value = expected_variable.get_value()
+
+                    try:
+                        expected_variable.set_value(new_value)
+                    except ValueError:
+                        raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{value.valuetype.name.lower()}** esperado.')
+
+                    if await gsm.update_guild_variable(expected_variable):
+                        await message.add_reaction('✅')
+                    else:
+                        expected_variable.set_value(prev_value)
+                        raise CommandError(f'Não foi possível modificar o valor da variável `{args[0]}`.')
+                else:
+                    return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
+            else:
+                return self.get_usage_embed(message)

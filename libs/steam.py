@@ -1,6 +1,5 @@
 import aiohttp
 import logging
-from enum import Enum, auto
 
 # @TODO: Fazer com que APIs retornem seus próprios objetos
 class SteamApi:

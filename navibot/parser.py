@@ -1,6 +1,7 @@
 import sys
 import logging
 import io
+
 from navibot.errors import ParserError
 
 PARSER_STRING_LITERAL = '"'
@@ -151,7 +152,7 @@ class Parser:
                 try:
                     buffer.write(ESCAPE_MAP[nextc])
                 except KeyError:
-                    raise ParserError(f"Caractere de escape `{PARSER_STRING_ESCAPE}{nextc}` inválido ou não mapeado na DEBUG_TABela.")
+                    raise ParserError(f"Caractere de escape `{PARSER_STRING_ESCAPE}{nextc}` inválido ou não mapeado.")
                 finally:
                     self.seek(1)
             elif char == PARSER_STRING_SUBCOMMAND_START:
@@ -210,7 +211,6 @@ class Parser:
         # 3. Caso - echo "Teste {time "batata 1}"
         # 3. Caso - echo "Teste {echo "batata {echo "teste"} 1"}"
         # 3. Caso - echo "Teste {echo "batata {echo "teste} 1"}"
-        # echo " eating_str = True batata { subcommad_level = 2, eating_str = Falsle echo " eating_str = True teste 1" eating_str = False}"
         while char and subcommad_level:
             # Não ligar para o conteudo, apenas se ainda estamos montando corretamente a string de subcommand, sendo possível posteriormente
             # alimentar subcommand para o Parser
