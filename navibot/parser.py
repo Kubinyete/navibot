@@ -236,28 +236,28 @@ class Parser:
 
         return Parser(subcommand_input).parse()
 
-if __name__ == "__main__":
-    DEBUG_TAB = '\t'
+# if __name__ == "__main__":
+#     DEBUG_TAB = '\t'
 
-    def debug_print_pipeline(pipeline, lvl=0):
-        for cmdreq in pipeline:
-            print(f"{DEBUG_TAB * lvl}Comando {cmdreq.cmd}:")
-            print(f"{DEBUG_TAB * lvl}Args:")
+#     def debug_print_pipeline(pipeline, lvl=0):
+#         for cmdreq in pipeline:
+#             print(f"{DEBUG_TAB * lvl}Comando {cmdreq.cmd}:")
+#             print(f"{DEBUG_TAB * lvl}Args:")
 
-            for argument in cmdreq.args:
-                if isinstance(argument, str):
-                    print(f"{DEBUG_TAB * (lvl + 1)}{argument}")
-                else:
-                    for chunk in argument:
-                        if isinstance(chunk, list):
-                            debug_print_pipeline(chunk, lvl=lvl + 2)
-                        else:
-                            print(f"{DEBUG_TAB * (lvl + 1)}{chunk}")
+#             for argument in cmdreq.args:
+#                 if isinstance(argument, str):
+#                     print(f"{DEBUG_TAB * (lvl + 1)}{argument}")
+#                 else:
+#                     for chunk in argument:
+#                         if isinstance(chunk, list):
+#                             debug_print_pipeline(chunk, lvl=lvl + 2)
+#                         else:
+#                             print(f"{DEBUG_TAB * (lvl + 1)}{chunk}")
 
-        print(f"{DEBUG_TAB * lvl}---")
+#         print(f"{DEBUG_TAB * lvl}---")
 
-    p = Parser(sys.argv[1])
-    pipeline = p.parse()
+#     p = Parser(sys.argv[1])
+#     pipeline = p.parse()
 
-    # DEBUG
-    debug_print_pipeline(pipeline)
+#     # DEBUG
+#     debug_print_pipeline(pipeline)

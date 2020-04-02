@@ -35,7 +35,7 @@ class Command:
         self.usage = '{name}'
         self.aliases = []
 
-    def update_info(self, new_info: dict):
+    def update_info(self, new_info):
         for key, value in new_info.items():
             currattr = getattr(self, key, None)
             if currattr is not None:
@@ -48,7 +48,7 @@ class Command:
         raise NotImplementedError()
 
 class BotCommand(Command):
-    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, enable_usermap: bool=False, **kwargs):
+    def __init__(self, bot, permissionlevel=PermissionLevel.NONE, enable_usermap=False, **kwargs):
         super().__init__(bot)
 
         self.update_info(kwargs)
@@ -83,7 +83,7 @@ class BotCommand(Command):
         raise NotImplementedError()
 
 class CommandAlias:
-    def __init__(self, origin: Command):
+    def __init__(self, origin):
         self.origin = origin
 
 class GuildSettingsManager:
@@ -185,7 +185,7 @@ class Client(discord.Client):
             await coroutine(kwargs)
 
 class Config:
-    def __init__(self, configfile: str):
+    def __init__(self, configfile):
         self.kvalues = {}
         self.path = configfile
 
@@ -193,7 +193,7 @@ class Config:
         with open(self.path, 'r', encoding='utf-8') as f:
             self.kvalues = json.loads(''.join(f.readlines()))
 
-    def get(self, keystr:str, default=None):
+    def get(self, keystr, default=None):
         keys = keystr.split('.')
         curr = self.kvalues
 
@@ -300,7 +300,7 @@ class Bot:
     async def receive_message(self, kwargs):
         message = kwargs.get('message', None)
 
-        if message.author == self.client.user or message.author.bot:
+        if message.author == self.client.user or message.author.bot or not isinstance(message.channel, discord.TextChannel):
             return
 
         prefix = self.config.get('global.prefix', ';;')

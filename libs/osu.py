@@ -23,7 +23,7 @@ class OsuApi:
         self.domain = r'https://osu.ppy.sh'
         self.key = key
 
-    async def fetch_user(self, username, mode: Gamemode=Gamemode.OSU):
+    async def fetch_user(self, username, mode=Gamemode.OSU):
         async with self.session.get(f'{self.domain}/api/get_user', params={
             'k': self.key,
             'u': username,
@@ -32,7 +32,7 @@ class OsuApi:
         }) as response:
             return await response.json()
 
-    async def public_fetch_user_best(self, userid, mode: Gamemode=Gamemode.OSU, limit=10):
+    async def public_fetch_user_best(self, userid, mode=Gamemode.OSU, limit=10):
         assert limit >= 0
 
         async with self.session.get(f'{self.domain}/users/{userid}/scores/best', params={

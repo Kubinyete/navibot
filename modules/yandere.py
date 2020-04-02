@@ -1,6 +1,5 @@
-import navibot
-import logging
-import math
+import discord
+import asyncio
 
 from navibot.client import BotCommand, Slider
 from navibot.errors import CommandError
@@ -19,9 +18,9 @@ class CYandere(BotCommand):
         )
 
         self.api = YandereApi()
-        
-        # @TODO: Solução temporária até adicionarmos o contexto de variáveis de uma Guild
-        self.allowed_ratings = ('s')
+
+        # s: safe, q: questionable, e: explicit
+        self.safe_ratings = ('s')
         self.tags_per_embed = 20
         self.posts_per_page = 20
 
@@ -46,7 +45,6 @@ class CYandere(BotCommand):
 
         if 'tag' in flags:
             tag_json = await self.api.fetch_tags(name=inputstr, order='name', limit=0)
-            logging.debug(f"Received tag_json: {tag_json}")
 
             i = 0
             description = ""
@@ -66,18 +64,28 @@ class CYandere(BotCommand):
                 items.append(embed)
                 description = ""
         else:
-            post_json = await self.api.fetch_posts(tags=inputstr, page=page, limit=self.posts_per_page)
-            logging.debug(f"Received post_json: {post_json}")
+            gsm = self.get_guild_settings_manager()
+            nsfw_disabled = True
+
+            if isinstance(message.channel, discord.TextChannel):
+                post_json, nsfw_disabled = await asyncio.gather(
+                    self.api.fetch_posts(tags=inputstr, page=page, limit=self.posts_per_page),
+                    gsm.get_guild_variable(message.channel.guild.id, 'nsfw_disabled', default=True)
+                )
+
+                nsfw_disabled = nsfw_disabled.get_value()
+            else:
+                post_json = await self.api.fetch_posts(tags=inputstr, page=page, limit=self.posts_per_page)
 
             for post in post_json:
-                if post['rating'] in self.allowed_ratings:
+                if not nsfw_disabled or post['rating'] in self.safe_ratings:
                     embed = self.create_response_embed(message)
                     
                     description = f"`{post['tags']}`\n"
                     description += f":information_source: Ver [amostra]({post['sample_url']}) ({post['sample_width']}x{post['sample_height']}) ({bytes_string(post['sample_file_size'])})\n"
                     description += f":information_source: Ver [original]({post['file_url']}) ({post['width']}x{post['height']}) ({bytes_string(post['file_size'])})\n"
 
-                    if self.allowed_ratings:
+                    if nsfw_disabled:
                         description += f":warning: Algumas imagens podem não estar disponíveis devido à restrições de conteúdo (`help nsfw`)."
 
                     embed.title = f"{post['id']}"

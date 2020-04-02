@@ -1,5 +1,3 @@
-import navibot
-import logging
 import io
 
 from navibot.client import BotCommand, Slider

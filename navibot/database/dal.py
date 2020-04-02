@@ -1,4 +1,5 @@
 from databases import Database
+
 from navibot.database.models import GuildVariable, VariableType
 
 class BaseDAL:
@@ -10,7 +11,7 @@ class BaseDAL:
         raise NotImplementedError()
 
 class GuildVariableDAL(BaseDAL):
-    def map_current_object(self, row, guildid=None, key=None):
+    def map_current_object(self, row, guildid: int=None, key: str=None):
         return GuildVariable(
             guildid or int(row['gui_id']),
             key or str(row['gst_key']),

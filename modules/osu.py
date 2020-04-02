@@ -1,6 +1,3 @@
-import navibot
-import logging
-import math
 import time
 
 from navibot.client import BotCommand, Slider
@@ -19,11 +16,11 @@ class COsu(BotCommand):
         )
 
         self.api = OsuApi(
-            self.bot.config.get('modules.osu.key', '')
+            self.bot.config.get('modules.osu.key')
         )
 
         self.assets_domain = r"https://a.ppy.sh"
-        self.public_repo = self.bot.config.get('global.public_repo', '')
+        self.public_repo = self.bot.config.get('global.public_repo')
         self.max_best_scores = 10
 
     async def run(self, message, args, flags):

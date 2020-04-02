@@ -1,6 +1,3 @@
-import navibot
-import logging
-import io
 import asyncio
 
 from navibot.client import BotCommand, Slider
