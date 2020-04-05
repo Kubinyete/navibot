@@ -5,8 +5,9 @@ import datetime
 import math
 
 from navibot.client import BotCommand, CommandAlias, TimeoutContext, PermissionLevel
-from navibot.errors import CommandError
+from navibot.errors import CommandError, ParserError
 from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds
+from navibot.parser import ExpressionParser
 
 class CHelp(BotCommand):
     def __init__(self, bot):
@@ -175,3 +176,26 @@ class CRemind(BotCommand):
             stored.remove(reminder)
         except ValueError:
             logging.error(f"callback_free_reminder > Failed to remove {type(reminder)} from storage, context = {reminder}")
+
+class CExpressionParser(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "parseexpr",
+            aliases = ['expr', 'calc', 'bc'],
+            description = "Calcula a expressão matemática informada (Ex: 1 + 2 (2 / 4) * 9).",
+            usage = "{name} [expressao...]"
+        )
+
+    async def run(self, message, args, flags):
+        if not args:
+            return self.get_usage_embed(message)
+
+        try:
+            return str(ExpressionParser(''.join(args)).parse().evaluate())
+        except ParserError as e:
+            raise CommandError(f'Ocorreu um erro durante a execução do parser: {e}')
+        except OverflowError:
+            raise CommandError(f'O número recebido ultrapassa o tamanho permitido pela plataforma.')
+        except ZeroDivisionError:
+            raise CommandError(f'Divisão por zero não permitida.')

@@ -12,7 +12,7 @@ import databases
 
 from enum import Enum, auto
 
-from navibot.parser import Parser
+from navibot.parser import CommandParser
 from navibot.util import is_instance, is_subclass
 from navibot.errors import *
 from navibot.database.dal import GuildVariableDAL
@@ -292,7 +292,8 @@ class Bot:
         if self.playing_interval is None:
             self.playing_interval = IntervalContext(
                 self.config.get('global.playing_delay', 60),
-                self.callable_update_playing
+                self.callable_update_playing,
+                ignore_exception=True
             )
 
             self.playing_interval.create_task()
@@ -308,7 +309,7 @@ class Bot:
         if not message.content.startswith(prefix):
             return
         
-        parser = Parser(message.content[len(prefix):])
+        parser = CommandParser(message.content[len(prefix):])
 
         try:
             pipeline = parser.parse()
@@ -553,7 +554,7 @@ class Slider:
             self.caught_exception = e
         finally:
             if self.caught_exception:
-                self.client.remove_event('reaction_add')
+                self.client.remove_event("reaction_add", self.registered_event_id)
             else:
                 self.last_activity = time.time()
 
