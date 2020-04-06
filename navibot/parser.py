@@ -38,17 +38,20 @@ EXPR_SUB = '-'
 EXPR_MUL = '*'
 EXPR_DIV = '/'
 EXPR_POW = '^'
+EXPR_MOD = '%'
 EXPR_POINT = '.'
 EXPR_VIRG = ','
 EXPR_PAR_START = '('
 EXPR_PAR_END = ')'
 
 EXPR_SEPARATOR = (
+    PARSER_WHITESPACE,
     EXPR_ADD,
     EXPR_SUB,
     EXPR_MUL,
     EXPR_DIV,
     EXPR_POW,
+    EXPR_MOD,
     EXPR_PAR_START,
     EXPR_PAR_END
 )
@@ -58,7 +61,8 @@ EXPR_OPERATORS = (
     EXPR_SUB,
     EXPR_MUL,
     EXPR_DIV,
-    EXPR_POW
+    EXPR_POW,
+    EXPR_MOD
 )
 
 EXPR_PRIORITY_MAP = {
@@ -66,7 +70,12 @@ EXPR_PRIORITY_MAP = {
     EXPR_SUB: 1,
     EXPR_MUL: 2,
     EXPR_DIV: 2,
+    EXPR_MOD: 2,
     EXPR_POW: 3,
+}
+
+EXPR_CONSTANTS = {
+    'PI': math.pi
 }
 
 class CommandRequest:
@@ -313,6 +322,8 @@ class No:
                 return leftval / rightval
             elif self.value == EXPR_POW:
                 return math.pow(leftval, rightval)
+            elif self.value == EXPR_MOD:
+                return leftval % rightval
             else:
                 raise ValueError(f'Operador {self.value} desconhecido.')
 
@@ -326,41 +337,62 @@ class ExpressionTree:
 
     def insert_value(self, val):
         if not self.head:
+            # Adicione o primeiro valor
             self.head = No(val)
         else:
-            self.at.right = No(val)
+            if self.at:
+                # Já temos um operador
+                assert self.at.is_operator()
+                
+                if self.at.right:
+                    # Estamos adicionando um valor a um operador já preenchido
+                    # Ex: 2x4 -2
+                    # Neste caso, -2 será uma SOMA com -2, portanto precisamos
+                    # permitir neste contexto que o número adicionado suba na árvore como uma SOMA.
+                    self.insert_operator(EXPR_ADD)
+                    self.insert_value(val)
+                else:
+                    self.at.right = No(val)
+            else:
+                # Estamos adicionando nosso segundo valor, sem operador, adicionar um operador de soma
+                self.insert_operator(EXPR_ADD)
+                self.insert_value(val)
 
     def insert_operator(self, op):
         new = No(op)
 
         if self.at:
+            assert self.at.right
+
+            # Estamos 'concorrendo' com um outro operador
             if new.get_priority() > self.at.get_priority():
+                # Tem maior prioridade que o antigo, desça a árvore
                 new.left = self.at.right
                 self.at.right = new
                 self.at = self.at.right
             else:
-                if self.at is self.head:
-                    new.left = self.at
-                    self.head = new
-                    self.at = self.head
-                else:
-                    new.left = self.head
-                    self.head = new
-                    self.at = self.head
+                # Não tem maior prioridade, é só uma sequência da operação atual, suba a árvore
+                new.left = self.head
+                self.head = new
+                self.at = self.head
+        else:
+            # Não temos nenhum operador ainda, estamos adicionando o primeiro
+            assert self.head and self.head.is_value()
 
-        elif self.head.is_value():
             new.left = self.head
             self.head = new
-            
-            if not self.at:
-                self.at = self.head
+            self.at = self.head
 
     def insert_tree(self, t):
+        # Se a árvore que estamos recebendo tem dados e operadores
         if not t.empty():
+            # Se não temos uma head, use a head da outra árvore como a nossa própria.
+            # o outro objeto será coletado pelo GC
             if not self.head:
                 self.head = t.head
                 self.at = self.head
             else:
+                # Apenas aumentamos nossa árvore
                 self.at.right = t.head
 
     def evaluate(self):
@@ -377,29 +409,49 @@ class ExpressionTree:
         self.output(self.head)
             
 class ExpressionParser(Parser):
+    def __init__(self, inputstr, constants=EXPR_CONSTANTS):
+        super().__init__(inputstr)
+        self.constants = constants
+
     def parse(self):
-        # -1.34 + 2 / 4
         t = ExpressionTree()
+        is_negative = False
 
         c = self.current_char()
         while c and c != EXPR_PAR_END:
             if c in EXPR_OPERATORS:
-                if t.empty():
-                    t.insert_value(0)
-                
-                t.insert_operator(c)
-                #print(f'Got operator: {c}')
+                if not is_negative:
+                    if c == EXPR_SUB:
+                        is_negative = True
+                    else:
+                        try:
+                            t.insert_operator(c)
+                        except AssertionError:
+                            raise ParserError(f'Erro de sintaxe, por favor verifique os dados informados.')
+                else:
+                    raise ParserError(f'Recebido operador {c}, porém esperado um valor.')
             elif char_in_range(c, '0', '9') or c in (EXPR_VIRG, EXPR_POINT):
                 n = self.eat_number()
-                t.insert_value(n)
-                #print(f'Got number: {n}')
+                t.insert_value(n if not is_negative else -1 * n)
+                is_negative = False
                 self.seek(-1)
             elif c == EXPR_PAR_START:
+                # Utiliza outro parser, recursivamente para trabalhar dentro dos parenteses
+                # implementação facilitada, porém consumo maior de memória
                 p = ExpressionParser(self.eat_expression_parenthesis())
                 t.insert_tree(p.parse())
                 self.seek(-1)
-            else:
-                pass
+            elif char_in_range(c, 'A', 'Z'):
+                identifier = self.eat_identifier()
+                value = self.constants.get(identifier, None)
+
+                if not value:
+                    raise ParserError(f'Constante {identifier} não definida.')
+                else:
+                    t.insert_value(value if not is_negative else -1 * value)
+                    is_negative = False
+                
+                self.seek(-1)
 
             self.seek(1)
             c = self.current_char()
@@ -431,6 +483,17 @@ class ExpressionParser(Parser):
         except ValueError:
             # Não deve acontecer nunca
             return ParserError('Não foi possível converter o valor obtido da expressão para float.')
+
+    def eat_identifier(self):
+        buffer = io.StringIO()
+
+        c = self.current_char()
+        while c and not c in EXPR_SEPARATOR:
+            buffer.write(c)
+            self.seek(1)
+            c = self.current_char()
+
+        return buffer.getvalue()
 
     def eat_expression_parenthesis(self):
         buffer = io.StringIO()
