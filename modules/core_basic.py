@@ -2,8 +2,9 @@ from datetime import datetime
 from random import randint, choice
 
 from navibot.client import BotCommand
-from navibot.errors import CommandError
+from navibot.errors import CommandError, ParserError
 from navibot.util import string_fullwidth_alphanumeric
+from navibot.parser import ExpressionParser
 
 class CEcho(BotCommand):
     def __init__(self, bot):
@@ -148,3 +149,26 @@ class CRoll(BotCommand):
             raise CommandError(F"É preciso informar números inteiros válidos.")
 
         return f"{randint(minv, maxv)}"
+
+class CExpressionParser(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "expr",
+            aliases = ['calc', 'bc'],
+            description = "Calcula a expressão matemática informada (Ex: 1 + 2 (2 / 4) * 9).",
+            usage = "{name} [expressao...]"
+        )
+
+    async def run(self, message, args, flags):
+        if not args:
+            return self.get_usage_embed(message)
+
+        try:
+            return str(ExpressionParser(''.join(args)).parse().evaluate())
+        except ParserError as e:
+            raise CommandError(f'Ocorreu um erro durante a execução do parser:\n{e}')
+        except OverflowError:
+            raise CommandError(f'O número recebido ultrapassa o tamanho permitido pela plataforma.')
+        except ZeroDivisionError:
+            raise CommandError(f'Divisão por zero não permitida.')

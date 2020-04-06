@@ -72,6 +72,8 @@ EXPR_PRIORITY_MAP = {
     EXPR_DIV: 2,
     EXPR_MOD: 2,
     EXPR_POW: 3,
+    # Maior prioridade possível, o caractere de EXPR_PAR_START é somente um apelido, não significa que será mapeado automaticamente
+    EXPR_PAR_START: 4
 }
 
 EXPR_CONSTANTS = {
@@ -292,6 +294,7 @@ class No:
         self.value = value
         self.left = left
         self.right = right
+        self.priority = EXPR_PRIORITY_MAP.get(self.value, 0) if self.is_operator() else 0
 
     def is_operator(self):
         return self.value in EXPR_OPERATORS
@@ -300,8 +303,7 @@ class No:
         return not self.is_operator()
 
     def get_priority(self):
-        assert self.is_operator()
-        return EXPR_PRIORITY_MAP.get(self.value, 0)
+        return self.priority
 
     def evaluate(self):
         if self.is_value():
@@ -364,14 +366,24 @@ class ExpressionTree:
         if self.at:
             assert self.at.right
 
+            newp = new.get_priority()
+            atp = self.at.get_priority()
+
             # Estamos 'concorrendo' com um outro operador
-            if new.get_priority() > self.at.get_priority():
+            if newp > atp:
                 # Tem maior prioridade que o antigo, desça a árvore
                 new.left = self.at.right
                 self.at.right = new
                 self.at = self.at.right
-            else:
+            elif newp == atp:
                 # Não tem maior prioridade, é só uma sequência da operação atual, suba a árvore
+                new.left = self.at
+                if self.at is self.head:
+                    self.head = self.at = new
+                else:
+                    self.head.right = new
+                    self.at = new
+            else:
                 new.left = self.head
                 self.head = new
                 self.at = self.head
@@ -388,11 +400,20 @@ class ExpressionTree:
         if not t.empty():
             # Se não temos uma head, use a head da outra árvore como a nossa própria.
             # o outro objeto será coletado pelo GC
+
+            # Está dentro de um parenteses, logo tem a maior prioridade
+            # de todas.
+            t.head.priority = EXPR_PRIORITY_MAP[EXPR_PAR_START]
+
             if not self.head:
                 self.head = t.head
-                self.at = self.head
+
+                if self.head.is_operator():
+                    self.at = self.head
             else:
                 # Apenas aumentamos nossa árvore
+                assert not self.at.right
+
                 self.at.right = t.head
 
     def evaluate(self):
@@ -439,6 +460,12 @@ class ExpressionParser(Parser):
                 # Utiliza outro parser, recursivamente para trabalhar dentro dos parenteses
                 # implementação facilitada, porém consumo maior de memória
                 p = ExpressionParser(self.eat_expression_parenthesis())
+
+                if is_negative:
+                    # É para usar um operador de SUB e não assumir que o valor é negativo.
+                    t.insert_operator(EXPR_SUB)
+                    is_negative = False
+
                 t.insert_tree(p.parse())
                 self.seek(-1)
             elif char_in_range(c, 'A', 'Z'):
