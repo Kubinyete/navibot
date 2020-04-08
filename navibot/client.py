@@ -86,6 +86,16 @@ class CommandAlias:
     def __init__(self, origin):
         self.origin = origin
 
+class InterpretedCommand(BotCommand):
+    def __init__(self, bot, name, command, permissionlevel=PermissionLevel.NONE):
+        super().__init__(bot, permissionlevel=permissionlevel, enable_usermap=False, name=name)
+        self.command = command
+
+    def get_usage_embed(self, message):
+        embed = self.create_response_embed(message, description=f'O comando `{self.name}` é interpretado pode ser traduzido em:\n\n`{self.command}`')
+        embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
+        return embed
+
 class GuildSettingsManager:
     def __init__(self, bot, defaultvalues={}):
         self.bot = bot
@@ -262,7 +272,7 @@ class Bot:
     def load_commands_from_module(self, mod):
         logging.info(f"Attempting to load commands from module: {mod}")
         
-        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and is_subclass(x, BotCommand) and x != BotCommand):
+        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand):
             cmd = obj[1](self)
 
             assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
@@ -274,6 +284,17 @@ class Bot:
 
             logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
 
+    def add_interpreted_command(self, command):
+        logging.info(f"Adding interpreted command: {command}")
+
+        if command.name in self.commands:
+            if isinstance(self.commands[command.name], InterpretedCommand):
+                self.commands[command.name] = command
+            else:
+                raise Exception(f'O comando {command.name} já existe e não pode ser substituido.')
+        else:
+            self.commands[command.name] = command
+
     def listen(self):
         self.client.listen(self.config.get('global.token'))
 
@@ -282,6 +303,34 @@ class Bot:
             text=message.author.name, 
             icon_url=message.author.avatar_url_as(size=32)
         )
+
+    def extract_mentions_from(self, args, flags, message):
+        flags['mentions'] = []
+        flags['channel_mentions'] = []
+        flags['role_mentions'] = []
+
+        for arg in args:
+                if arg.startswith('<@') and arg.endswith('>') and arg[2] in ('!', '&', '#'):
+                    uid = None
+                    try:
+                        uid = int(arg[3:-1])
+                    except ValueError:
+                        pass
+
+                    if uid:
+                        if arg[2] == '!':
+                            dest_list = flags['mentions']
+                            from_list = message.mentions
+                        elif arg[2] == '&':
+                            dest_list = flags['role_mentions']
+                            from_list = message.role_mentions
+                        elif arg[2] == '#':
+                            dest_list = flags['channel_mentions']
+                            from_list = message.channel_mentions
+
+                        for mention in from_list:
+                            if uid == mention.id:
+                                dest_list.append(mention)
 
     async def set_playing_game(self, playingstr, status=None, afk=False):
         await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
@@ -318,6 +367,9 @@ class Bot:
             if output:
                 if isinstance(output, str):
                     await message.channel.send(embed=self.create_response_embed(message, description=output))
+                elif isinstance(output, list):
+                    # Assumimos que seja uma lista de str
+                    await message.channel.send(embed=self.create_response_embed(message, description=' '.join(output)))
                 elif isinstance(output, discord.Embed):
                     await message.channel.send(embed=output)
                 elif isinstance(output, Slider):
@@ -376,12 +428,14 @@ class Bot:
                             if isinstance(chunk, list):
                                 arg[i] = await self.handle_pipeline_execution(message, chunk)
 
-                                if not isinstance(arg[i], str):
+                                if not isinstance(arg[i], str) and not isinstance(arg[i], list):
                                     raise BotError(f"O comando `{chunk[0].cmd}` não retornou dados compatíveis para utilizar de argumento...")
+                                elif isinstance(arg[i], list):
+                                    arg[i] = ' '.join(arg[i])
 
                         args[c] = ''.join(arg)
 
-                if not isinstance(pipeline_output, str):
+                if not isinstance(pipeline_output, str) and not isinstance(pipeline_output, list):
                     raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
                 
                 pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output)
@@ -404,14 +458,39 @@ class Bot:
         if 'h' in flags or 'help' in flags:
             output = command.get_usage_embed(message)
         else:
-            try:
-                if received_pipe_data:
-                    args.append(received_pipe_data)
+            # Precisamos filtrar quais menções são destinadas para este comando
+            # flags:
+            #   mentions: [User...]
+            #   channel_mentions: [GuildChannel...]
+            #   role_mentions: [Role...]
+            # @PERFORMANCE:
+            # Fazer isso para cada comando recebido é uma perda de desempenho
+            # porém necessária no contexto atual para dividirmos o que vem da biblioteca
+            # para cada comando.
+            
+            self.extract_mentions_from(args, flags, message)
 
-                output = await command.run(message, args, flags)
+            try:
+                # @TODO:
+                # Pensar em uma outra forma de passar saídas de PIPE para os comandos.
+                if received_pipe_data:
+                    if isinstance(received_pipe_data, list):
+                        args.extend(received_pipe_data)
+                    else:
+                        args.append(received_pipe_data)
+
+                if isinstance(command, InterpretedCommand):
+                    p = CommandParser(command.command)
+                    pipeline = p.parse()
+
+                    output = await self.handle_pipeline_execution(message, pipeline)
+                else:
+                    output = await command.run(message, args, flags)
             except CommandError as e:
                 logging.warn(f'Command {command.name} threw an error: {e}')
                 output = e
+            except (ParserError, BotError) as e:
+                raise e
             except Exception as e:
                 logging.error(f'Uncaught exception thrown while running {command.name}: {e}\n\n{traceback.format_exc()}')
 

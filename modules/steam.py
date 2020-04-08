@@ -69,17 +69,17 @@ class CSteam(BotCommand):
             embed.set_thumbnail(url=player['avatarfull'])
             
             embed.add_field(name='SteamID', value=player['steamid'], inline=True)
-            embed.add_field(name='Visibility', value='Private or Friends-only' if player['communityvisibilitystate'] != 3 else 'Public', inline=True)
-            embed.add_field(name='Level', value=level, inline=True)
+            embed.add_field(name='Visibilidade', value='Private or Friends-only' if player['communityvisibilitystate'] != 3 else 'Public', inline=True)
+            embed.add_field(name='Nível', value=level, inline=True)
             embed.add_field(name='Status', value=self.api.personastate_string(player['personastate']), inline=True)
 
             country = player.get('loccountrycode', None)
             if country:
-                embed.add_field(name='Country', value=f':flag_{country.lower()}:', inline=True)
+                embed.add_field(name='País', value=f':flag_{country.lower()}:', inline=True)
 
             realname = player.get('realname', None)
             if realname:
-                embed.add_field(name='Name', value=realname, inline=True)
+                embed.add_field(name='Nome real', value=realname, inline=True)
 
             items.append(embed)
 

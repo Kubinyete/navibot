@@ -88,7 +88,8 @@ class CommandRequest:
 
     def add_argument(self, arg):
         if isinstance(arg, str):
-            if arg.startswith("--"):
+            # Não permite começar com números Ex: -1
+            if arg.startswith("--") and len(arg) > 2 and (char_in_range(arg[2], 'a', 'z') or char_in_range(arg[2], 'A', 'Z')):
                 kv = arg.split("=")
 
                 if len(kv) > 1:
@@ -98,10 +99,9 @@ class CommandRequest:
                     if len(kv[0][2:]) > 0:
                         self.flags[kv[0][2:]] = True
                         return
-            elif arg.startswith("-"):
-                if len(arg) > 1:
-                    self.flags[arg[1:]] = True
-                    return
+            elif arg.startswith("-") and len(arg) > 1 and (char_in_range(arg[1], 'a', 'z') or char_in_range(arg[1], 'A', 'Z')):
+                self.flags[arg[1:]] = True
+                return
 
         self.args.append(arg)
 

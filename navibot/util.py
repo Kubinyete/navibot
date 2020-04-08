@@ -76,7 +76,7 @@ def seconds_string(seconds):
 	if m >= 1:
 		output.append(f"{m} minuto(s)")
 	if seconds > 0:
-		output.append(f"{seconds} segundo(s)")
+		output.append(f"{seconds:.0f} segundo(s)")
 	
 	return ", ".join(output)
 

@@ -3,10 +3,11 @@ import logging
 import time
 import datetime
 import math
+import discord
 
-from navibot.client import BotCommand, CommandAlias, TimeoutContext, PermissionLevel
+from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel
 from navibot.errors import CommandError
-from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds
+from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string
 
 class CHelp(BotCommand):
     def __init__(self, bot):
@@ -53,13 +54,20 @@ class CAvatar(BotCommand):
             bot,
             name = "avatar",
             aliases = ['av'],
-            description = "Retorna o avatar do indivíduo mencionado.",
-            usage = "{name} @Usuario [--url] [--size=256]"
+            description = "Retorna o avatar da Guild ou indivíduo mencionado.",
+            usage = "{name} [@Usuario] [--guild] [--url] [--size=256]"
         )
 
     async def run(self, message, args, flags):
-        target = message.mentions[0] if message.mentions else None
+        target = None
 
+        if not 'guild' in flags:
+            mentions = flags.get('mentions', None)
+
+            target = mentions[0] if mentions else None
+        else:
+            target = message.guild
+        
         if not target:
             return self.get_usage_embed(message)
 
@@ -73,14 +81,16 @@ class CAvatar(BotCommand):
         except AssertionError:
             raise CommandError("O argumento `--size` deve estar entre 16 e 4096 e ser uma potência de 2 (Ex: 32, 64, 128...).")
 
-        out = None
+        icon_url = str(target.avatar_url_as(size=size) if isinstance(target, discord.User) else target.icon_url_as(size=size))
 
         if "url" in flags:
-            out = str(target.avatar_url_as(size=size))
-        else:
-            out = self.create_response_embed(message) 
+            return icon_url
+        
+        out = self.create_response_embed(message) 
+        out.set_image(url=icon_url)
+            
+        if isinstance(target, discord.User):
             out.title = f"Avatar de {target.name}"
-            out.set_image(url=target.avatar_url_as(size=256))
         
         return out
 
@@ -175,3 +185,78 @@ class CRemind(BotCommand):
             stored.remove(reminder)
         except ValueError:
             logging.error(f"callback_free_reminder > Failed to remove {type(reminder)} from storage, context = {reminder}")
+
+class CSpotify(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "spotify",
+            aliases = ['sptfy'],
+            description = "Retorna informações da atividade Spotify que o usuário esteja realizando.",
+            usage = "{name} @Usuario"
+        )
+
+    async def run(self, message, args, flags):
+        mentions = flags.get('mentions', None)
+
+        target = mentions[0] if mentions else None
+
+        if not target:
+            return self.get_usage_embed(message)
+
+        spotify = None
+
+        for act in target.activities:
+            if isinstance(act, discord.Spotify):
+                spotify = act
+
+        if spotify:
+            out = self.create_response_embed(message) 
+            out.title = f"{target.name} está ouvindo"
+            out.add_field(name='Título', value=spotify.title, inline=True)
+            out.add_field(name='Artista(s)', value=', '.join(spotify.artists), inline=True)
+            out.add_field(name='Album', value=spotify.album, inline=True)
+            out.add_field(name='Duração', value=seconds_string(spotify.duration.total_seconds()), inline=True)
+            out.color = spotify.color
+            out.set_thumbnail(url=spotify.album_cover_url)
+            return out
+        else:
+            return ':information_source: O usuário não está no Spotify atualmente.'
+
+class CEmbed(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "embed",
+            aliases = ['emb'],
+            description = "Retorna um Embed de acordo com os parâmetros informados.",
+            usage = '{name} [-t "titulo"] [-d "descricao"] [-img "url"] [-timg "url"]'
+        )
+
+    async def run(self, message, args, flags):
+        if not args or not flags:
+            return self.get_usage_embed(message)
+
+        embed = self.create_response_embed(message)
+        index = 0
+
+        for key in flags.keys():
+            if index < len(args):
+                curritem = args[index]
+
+                if key == 't':
+                    embed.title = curritem
+                elif key == 'd':
+                    embed.description = curritem
+                elif key == 'img':
+                    embed.set_image(url=curritem)
+                elif key == 'timg':
+                    embed.set_thumbnail(url=curritem)
+                else:
+                    raise CommandError(f'A flag {key} informada não existe.')
+
+                index += 1
+            else:
+                break
+
+        return embed

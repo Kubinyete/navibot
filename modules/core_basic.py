@@ -1,3 +1,5 @@
+import logging
+
 from datetime import datetime
 from random import randint, choice
 
@@ -20,7 +22,7 @@ class CEcho(BotCommand):
         if not args:
             return self.get_usage_embed(message)
 
-        return ' '.join(args)
+        return args
 
 class CFullwidth(BotCommand):
     def __init__(self, bot):
@@ -36,7 +38,7 @@ class CFullwidth(BotCommand):
         if not args:
             return self.get_usage_embed(message)
 
-        return string_fullwidth_alphanumeric(' '.join(args))
+        return [string_fullwidth_alphanumeric(arg) for arg in args]
 
 class CClap(BotCommand):
     def __init__(self, bot):
@@ -90,12 +92,7 @@ class CFormat(BotCommand):
             usage = "{name} [-u|--upper] [-l|--lower] [-r|--reverse]"
         )
 
-    async def run(self, message, args, flags):
-        if not args:
-            return self.get_usage_embed(message)
-
-        transf = ' '.join(args)
-
+    def transform(self, transf, flags):
         for flag in flags.keys():
             if flag in ('u', 'upper'):
                 transf = transf.upper()
@@ -105,6 +102,12 @@ class CFormat(BotCommand):
                 transf = transf[::-1]
 
         return transf
+
+    async def run(self, message, args, flags):
+        if not args:
+            return self.get_usage_embed(message)
+
+        return [self.transform(transf, flags) for transf in args]
 
 class CChoice(BotCommand):
     def __init__(self, bot):
@@ -172,3 +175,34 @@ class CExpressionParser(BotCommand):
             raise CommandError(f'O número recebido ultrapassa o tamanho permitido pela plataforma.')
         except ZeroDivisionError:
             raise CommandError(f'Divisão por zero não permitida.')
+
+class CGetMember(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "getmember",
+            aliases = ['gmember', 'gmem'],
+            description = "Retorna uma ou mais propriedades desejadas do membro mencionado.",
+            usage = "{name} [--name|--id|--nick|--display_name]"
+        )
+
+        self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status')
+
+    async def run(self, message, args, flags):
+        users = flags.get('mentions', None)
+        
+        target = users[0] if users else None
+
+        if not target:
+            return self.get_usage_embed(message)
+
+        ret = []
+
+        for key, value in flags.items():
+            if key in self.allowed_attr:
+                tmp = getattr(target, key, None)
+
+                if tmp:
+                    ret.append(str(tmp))
+
+        return ret

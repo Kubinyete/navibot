@@ -3,7 +3,8 @@ import asyncio
 import logging
 import aiohttp
 
-from navibot.client import BotCommand, PermissionLevel
+from navibot.client import BotCommand, InterpretedCommand, PermissionLevel
+from navibot.parser import CommandParser
 from navibot.errors import CommandError
 
 class CSetAvatar(BotCommand):
@@ -130,3 +131,35 @@ class CGuildVariables(BotCommand):
                     return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
             else:
                 return self.get_usage_embed(message)
+
+class CAddCommand(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "addcommand",
+            aliases = ['acmd'],
+            description = "Adiciona um comando interpretado.",
+            usage = '{name} nome "comando"',
+            permissionlevel = PermissionLevel.BOT_OWNER
+        )
+
+    async def run(self, message, args, flags):
+        if len(args) < 2:
+            return self.get_usage_embed(message)
+
+        try:
+            p = CommandParser(args[1])
+            p.parse()
+            
+            self.bot.add_interpreted_command(
+                InterpretedCommand(
+                    self.bot,
+                    args[0],
+                    args[1]
+                )
+            )
+        except Exception as e:
+            logging.error(e)
+            raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n{e}')
+
+        await message.add_reaction('✅')

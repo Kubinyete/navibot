@@ -50,13 +50,13 @@ class COsu(BotCommand):
             profile_embed.url = f"{self.api.domain}/u/{user['user_id']}"
             profile_embed.set_thumbnail(url=f"{self.assets_domain}/{user['user_id']}?t={time.time()}")
             # @TODO: Mostrar join_date de forma amigável
-            profile_embed.add_field(name="Join date", value=user['join_date'], inline=True),
+            profile_embed.add_field(name="Data de criação", value=user['join_date'], inline=True),
             # @TODO: Mostrar total_seconds_played de forma amigável
-            profile_embed.add_field(name="Playtime", value=f"{int(user['total_seconds_played']) / 86400.0 if user['total_seconds_played'] is not None else 0:.2f} day(s)", inline=True),
-            profile_embed.add_field(name="Playcount", value=user['playcount'], inline=True),
+            profile_embed.add_field(name="Tempo de jogo", value=f"{int(user['total_seconds_played']) / 86400.0 if user['total_seconds_played'] is not None else 0:.2f} day(s)", inline=True),
+            profile_embed.add_field(name="Vezes jogadas", value=user['playcount'], inline=True),
             profile_embed.add_field(name="PP", value=user['pp_raw'], inline=True),
-            profile_embed.add_field(name="Accuracy", value=f"{float(user['accuracy']) if user['accuracy'] is not None else 0:.2f}", inline=True),
-            profile_embed.add_field(name="Level", value=f"{float(user['level']) if user['level'] is not None else 0:.2f}", inline=True)
+            profile_embed.add_field(name="Precisão", value=f"{float(user['accuracy']) if user['accuracy'] is not None else 0:.2f}", inline=True),
+            profile_embed.add_field(name="Nível", value=f"{float(user['level']) if user['level'] is not None else 0:.2f}", inline=True)
 
             items.append(profile_embed)
 
