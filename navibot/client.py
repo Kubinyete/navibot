@@ -9,6 +9,7 @@ import inspect
 import time
 import traceback
 import databases
+import re
 
 from enum import Enum, auto
 
@@ -305,33 +306,40 @@ class Bot:
         )
 
     def extract_mentions_from(self, args, flags, message):
+        if not message.guild:
+            return
+
         flags['mentions'] = []
         flags['channel_mentions'] = []
         flags['role_mentions'] = []
 
         for arg in args:
-            if arg.startswith('<@') and arg.endswith('>') and arg[2] in ('!', '&', '#'):
-                uid = None
+            # https://discordapp.com/developers/docs/reference#message-formatting
+            if re.findall('^<(@[!&]?|#)[0-9]+>$', arg):
                 try:
-                    uid = int(arg[3:-1])
+                    num = int(re.findall('[0-9]+', arg)[0])
                 except ValueError:
-                    pass
+                    # Impossível de acontecer
+                    raise BotError('Recebido menção como argumento porém o identificador é inválido.')
 
-                if uid:
-                    if arg[2] == '!':
-                        dest_list = flags['mentions']
-                        from_list = message.mentions
-                    elif arg[2] == '&':
+                found = None
+                if arg[1] == '@':
+                    if arg[2] == '&':
                         dest_list = flags['role_mentions']
-                        from_list = message.role_mentions
-                    elif arg[2] == '#':
-                        dest_list = flags['channel_mentions']
-                        from_list = message.channel_mentions
+                        found = message.guild.get_role(num)
+                    else:
+                        # Usuario e Usuario (Apelido)
+                        dest_list = flags['mentions']
+                        found = message.guild.get_member(num)
+                elif arg[1] == '#':
+                    dest_list = flags['channel_mentions']
+                    found = message.guild.get_channel(num)
 
-                    # @TODO: Caso não encontrarmos, procurar de outra forma na Guild, pois pode ser que estejamos interpretando um comando (aonde será perdido as menções no objeto mensagem)
-                    for mention in from_list:
-                        if uid == mention.id:
-                            dest_list.append(mention)
+                if found:
+                    dest_list.append(found)
+                else:
+                    logging.error(f'args = {args}')
+                    raise BotError(f'O objeto `{num}` mencionado não foi encontrado na Guild atual.')
 
     async def set_playing_game(self, playingstr, status=None, afk=False):
         await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
