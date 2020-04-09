@@ -81,7 +81,7 @@ class CAvatar(BotCommand):
         except AssertionError:
             raise CommandError("O argumento `--size` deve estar entre 16 e 4096 e ser uma potência de 2 (Ex: 32, 64, 128...).")
 
-        icon_url = str(target.avatar_url_as(size=size) if isinstance(target, discord.User) else target.icon_url_as(size=size))
+        icon_url = str(target.avatar_url_as(size=size) if isinstance(target, discord.Member) else target.icon_url_as(size=size))
 
         if "url" in flags:
             return icon_url
@@ -89,7 +89,7 @@ class CAvatar(BotCommand):
         out = self.create_response_embed(message) 
         out.set_image(url=icon_url)
             
-        if isinstance(target, discord.User):
+        if isinstance(target, discord.Member):
             out.title = f"Avatar de {target.name}"
         
         return out

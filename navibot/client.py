@@ -92,7 +92,7 @@ class InterpretedCommand(BotCommand):
         self.command = command
 
     def get_usage_embed(self, message):
-        embed = self.create_response_embed(message, description=f'O comando `{self.name}` é interpretado pode ser traduzido em:\n\n`{self.command}`')
+        embed = self.create_response_embed(message, description=f'O comando `{self.name}` é interpretado e pode ser traduzido para:\n\n`{self.command}`')
         embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
         return embed
 
@@ -310,27 +310,28 @@ class Bot:
         flags['role_mentions'] = []
 
         for arg in args:
-                if arg.startswith('<@') and arg.endswith('>') and arg[2] in ('!', '&', '#'):
-                    uid = None
-                    try:
-                        uid = int(arg[3:-1])
-                    except ValueError:
-                        pass
+            if arg.startswith('<@') and arg.endswith('>') and arg[2] in ('!', '&', '#'):
+                uid = None
+                try:
+                    uid = int(arg[3:-1])
+                except ValueError:
+                    pass
 
-                    if uid:
-                        if arg[2] == '!':
-                            dest_list = flags['mentions']
-                            from_list = message.mentions
-                        elif arg[2] == '&':
-                            dest_list = flags['role_mentions']
-                            from_list = message.role_mentions
-                        elif arg[2] == '#':
-                            dest_list = flags['channel_mentions']
-                            from_list = message.channel_mentions
+                if uid:
+                    if arg[2] == '!':
+                        dest_list = flags['mentions']
+                        from_list = message.mentions
+                    elif arg[2] == '&':
+                        dest_list = flags['role_mentions']
+                        from_list = message.role_mentions
+                    elif arg[2] == '#':
+                        dest_list = flags['channel_mentions']
+                        from_list = message.channel_mentions
 
-                        for mention in from_list:
-                            if uid == mention.id:
-                                dest_list.append(mention)
+                    # @TODO: Caso não encontrarmos, procurar de outra forma na Guild, pois pode ser que estejamos interpretando um comando (aonde será perdido as menções no objeto mensagem)
+                    for mention in from_list:
+                        if uid == mention.id:
+                            dest_list.append(mention)
 
     async def set_playing_game(self, playingstr, status=None, afk=False):
         await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
