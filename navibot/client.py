@@ -97,6 +97,12 @@ class InterpretedCommand(BotCommand):
         embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
         return embed
 
+    async def run(self, message, args, flags):
+        p = CommandParser(self.command)
+        pipeline = p.parse()
+
+        return await self.bot.handle_pipeline_execution(message, pipeline, activator_args=args, activator_flags=flags)
+
 class GuildSettingsManager:
     def __init__(self, bot, defaultvalues={}):
         self.bot = bot
@@ -243,6 +249,7 @@ class Bot:
 
         self.commands = {}
         self.load_modules(f'{self.curr_path}/modules')
+        self.load_interpreted_commands()
         
         self.active_database = None
 
@@ -286,7 +293,7 @@ class Bot:
             logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
 
     def add_interpreted_command(self, command):
-        logging.info(f"Adding interpreted command: {command}")
+        logging.info(f"Adding interpreted command: {command.name} ({command})")
 
         if command.name in self.commands:
             if isinstance(self.commands[command.name], InterpretedCommand):
@@ -295,6 +302,16 @@ class Bot:
                 raise Exception(f'O comando {command.name} já existe e não pode ser substituido.')
         else:
             self.commands[command.name] = command
+
+    def load_interpreted_commands(self):
+        for command in self.config.get('interpreted_commands', []):
+            self.add_interpreted_command(
+                InterpretedCommand(
+                    self,
+                    command['name'],
+                    command['value']
+                )
+            )
 
     def listen(self):
         self.client.listen(self.config.get('global.token'))
@@ -412,7 +429,7 @@ class Bot:
             
             return currlevel.value >= command.permissionlevel.value if currlevel else False
 
-    async def handle_pipeline_execution(self, message, pipeline):
+    async def handle_pipeline_execution(self, message, pipeline, activator_args=None, activator_flags=None):
         pipeline_output = ''
         
         for command in pipeline:
@@ -435,7 +452,7 @@ class Bot:
                             chunk = arg[i]
                             # Temos uma outra PIPELINE, execute ela recursivamente antes para termos o resultado.
                             if isinstance(chunk, list):
-                                arg[i] = await self.handle_pipeline_execution(message, chunk)
+                                arg[i] = await self.handle_pipeline_execution(message, chunk, activator_args=activator_args, activator_flags=activator_flags)
 
                                 if not isinstance(arg[i], str) and not isinstance(arg[i], list):
                                     raise BotError(f"O comando `{chunk[0].cmd}` não retornou dados compatíveis para utilizar de argumento...")
@@ -447,13 +464,13 @@ class Bot:
                 if not isinstance(pipeline_output, str) and not isinstance(pipeline_output, list):
                     raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
                 
-                pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output)
+                pipeline_output = await self.handle_command_execution(handler, message, args, flags, received_pipe_data=pipeline_output, activator_args=activator_args, activator_flags=activator_flags)
             else:
                 raise BotError(f"O comando `{command.cmd}` não existe, abortando...")
 
         return pipeline_output
 
-    async def handle_command_execution(self, command, message, args, flags, received_pipe_data=''):
+    async def handle_command_execution(self, command, message, args, flags, received_pipe_data='', activator_args=None, activator_flags=None):
         # @TODO: Adicionar verificador de menções, pois o registro de menções é feito sobre todas as menções na mensagem completa,
         # porém, cada comando deveria somente ter acesso a lista de menções que lhe foi passada
         # Ex: "";;echo @Piratex "{av @Navi --url --size=32}"
@@ -467,16 +484,6 @@ class Bot:
         if 'h' in flags or 'help' in flags:
             output = command.get_usage_embed(message)
         else:
-            # Precisamos filtrar quais menções são destinadas para este comando
-            # flags:
-            #   mentions: [User...]
-            #   channel_mentions: [GuildChannel...]
-            #   role_mentions: [Role...]
-            # @PERFORMANCE:
-            # Fazer isso para cada comando recebido é uma perda de desempenho
-            # porém necessária no contexto atual para dividirmos o que vem da biblioteca
-            # para cada comando.
-            
             self.extract_mentions_from(args, flags, message)
 
             try:
@@ -488,13 +495,13 @@ class Bot:
                     else:
                         args.append(received_pipe_data)
 
-                if isinstance(command, InterpretedCommand):
-                    p = CommandParser(command.command)
-                    pipeline = p.parse()
+                if activator_args != None:
+                    flags['activator_args'] = activator_args
 
-                    output = await self.handle_pipeline_execution(message, pipeline)
-                else:
-                    output = await command.run(message, args, flags)
+                if activator_flags != None:
+                    flags['activator_flags'] = activator_flags
+
+                output = await command.run(message, args, flags)
             except CommandError as e:
                 logging.warn(f'Command {command.name} threw an error: {e}')
                 output = e

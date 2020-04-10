@@ -8,7 +8,7 @@ class CNsfw(BotCommand):
             name = 'nsfw',
             description = "Ativa ou desativa o conteúdo NSFW para esta Guild.",
             usage = "{name} [-e|--enable] [-d|--disable]",
-            permissionlevel=PermissionLevel.GUILD_OWNER
+            permissionlevel=PermissionLevel.GUILD_MOD
         )
 
     async def run(self, message, args, flags):

@@ -137,9 +137,9 @@ class CAddCommand(BotCommand):
         super().__init__(
             bot,
             name = "addcommand",
-            aliases = ['acmd'],
+            aliases = ['addcmd'],
             description = "Adiciona um comando interpretado.",
-            usage = '{name} nome "comando"',
+            usage = '{name} nome [comando...]',
             permissionlevel = PermissionLevel.BOT_OWNER
         )
 
@@ -148,14 +148,15 @@ class CAddCommand(BotCommand):
             return self.get_usage_embed(message)
 
         try:
-            p = CommandParser(args[1])
+            cmd = ' '.join(args[1:])
+            p = CommandParser(cmd)
             p.parse()
             
             self.bot.add_interpreted_command(
                 InterpretedCommand(
                     self.bot,
                     args[0],
-                    args[1]
+                    cmd
                 )
             )
         except Exception as e:

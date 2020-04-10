@@ -183,7 +183,7 @@ class CGetMember(BotCommand):
             name = "getmember",
             aliases = ['gmember', 'gmem'],
             description = "Retorna uma ou mais propriedades desejadas do membro mencionado.",
-            usage = "{name} [--name|--id|--nick|--display_name]"
+            usage = "{name} @Usuario [--self] [--name|--id|--nick|--display_name|--mention]"
         )
 
         self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status')
@@ -191,7 +191,10 @@ class CGetMember(BotCommand):
     async def run(self, message, args, flags):
         users = flags.get('mentions', None)
         
-        target = users[0] if users else None
+        if 'self' in flags:
+            target = message.author
+        else:
+            target = users[0] if users else None
 
         if not target:
             return self.get_usage_embed(message)
@@ -204,5 +207,38 @@ class CGetMember(BotCommand):
 
                 if tmp:
                     ret.append(str(tmp))
+            elif key == 'mention':
+                ret.append(target.mention)
 
         return ret
+
+class CGetArg(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "getarg",
+            aliases = ['garg', 'arg'],
+            description = "Retorna uma ou mais argumentos recebidos de um comando interpretado que seja o ativador.",
+            usage = "{name} indice [--all]"
+        )
+
+    async def run(self, message, args, flags):
+        pipeline_args = flags.get('activator_args', None)
+        
+        if pipeline_args is None:
+            raise CommandError('Este comando só pode ser executado quando for solicitado por um comando interpretado anteriormente na PIPELINE.')
+
+        if 'all' in flags:
+            return pipeline_args
+        else:
+            indice = -1
+            if args:
+                try:
+                    indice = int(args[0])
+                except ValueError:
+                    pass
+
+            if indice >= 0 and indice < len(pipeline_args):
+                return pipeline_args[indice]
+            else:
+                raise CommandError('É preciso informar um indice válido.')
