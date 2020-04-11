@@ -338,7 +338,7 @@ class Bot:
         # Nosso gerênciador de variáveis por Guild.
         self.guildsettings = GuildSettingsManager(
             self, 
-            defaultvalues=self.config.get('guild_settings', default={})
+            defaultvalues=self.config.get('guild_settings')
         )
 
     async def get_database_connection(self):
@@ -688,6 +688,10 @@ class GuildSettingsManager:
 
         ok = await dal.update_variable(variable)
 
+        # @TODO:
+        # Arrumar essa lógica aqui, não é possível determinar se o select falhou pois
+        # a conexão do databases.Database não retorna a quantidade de linhas alteradas
+        # ou pelomenos deveria estar mas não está.
         if not ok:
             # Não existe ainda, crie
             return await dal.create_variable(variable)

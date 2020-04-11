@@ -238,3 +238,4 @@ class CGetArg(BotCommand):
                 return pipeline_args[indice]
             else:
                 raise CommandError('É preciso informar um indice válido.')
+

@@ -1,3 +1,5 @@
+import logging
+
 from databases import Database
 
 from navibot.database.models import GuildVariable, VariableType
@@ -41,33 +43,45 @@ class GuildVariableDAL(BaseDAL):
         return [self.map_current_object(row, guildid=guildid) for row in rows] if rows else []
 
     async def create_variable(self, variable: GuildVariable):
-        return not await self.conn.execute(
-            query='INSERT INTO guild_settings VALUES (:id, :key, :value, :type)',
-            values={
-                'id': variable.guildid,
-                'key': variable.key,
-                'value': variable.value,
-                'type': variable.valuetype.value
-            }
-        )
+        async with self.conn.transaction():
+            ok = await self.conn.execute(
+                query='INSERT INTO guild_settings VALUES (:id, :key, :value, :type)',
+                values={
+                    'id': variable.guildid,
+                    'key': variable.key,
+                    'value': variable.value,
+                    'type': variable.valuetype.value
+                }
+            )
+
+        logging.info(f'GuildVariableDAL: received ok = {ok}')
+        return ok >= 0
 
     async def update_variable(self, variable: GuildVariable):
-        return not await self.conn.execute(
-            query='UPDATE guild_settings SET gst_value = :value, gst_value_type = :type WHERE gui_id = :id AND gst_key = :key',
-            values={
-                'id': variable.guildid,
-                'key': variable.key,
-                'value': variable.value,
-                'type': variable.valuetype.value
-            }
-        )
+        async with self.conn.transaction():
+            ok = await self.conn.execute(
+                query='UPDATE guild_settings SET gst_value = :value, gst_value_type = :type WHERE gui_id = :id AND gst_key = :key',
+                values={
+                    'id': variable.guildid,
+                    'key': variable.key,
+                    'value': variable.value,
+                    'type': variable.valuetype.value
+                }
+            )
+
+        logging.info(f'GuildVariableDAL: received ok = {ok}')
+        return ok >= 0
 
     async def remove_variable(self, variable: GuildVariable):
-        return not await self.conn.execute(
-            query='DELETE FROM guild_settings WHERE gui_id = :id AND gst_key = :key',
-            values={
-                'id': variable.guildid,
-                'key': variable.key
-            }
-        )
+        async with self.conn.transaction():
+            ok = await self.conn.execute(
+                query='DELETE FROM guild_settings WHERE gui_id = :id AND gst_key = :key',
+                values={
+                    'id': variable.guildid,
+                    'key': variable.key
+                }
+            )
+
+        logging.info(f'GuildVariableDAL: received ok = {ok}')
+        return ok >= 0
     
