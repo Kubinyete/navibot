@@ -139,7 +139,7 @@ class InterpretedCommand(BotCommand):
 
         self.command = command
 
-    def get_usage_text(self, ctx: Context):
+    def get_usage_text(self):
         return f'O comando `{self.name}` é interpretado e pode ser traduzido para:\n\n`{self.command}`'
 
     async def run(self, ctx: Context, args: list, flags: dict):

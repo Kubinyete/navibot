@@ -184,7 +184,7 @@ class CGetMember(BotCommand):
             usage = "[@Usuario] [--self] [--name|--id|--nick|--display_name|--mention]"
         )
 
-        self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status')
+        self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status', 'mention')
 
     async def run(self, message, args, flags):
         users = flags.get('mentions', None)
@@ -205,8 +205,6 @@ class CGetMember(BotCommand):
 
                 if tmp:
                     ret.append(str(tmp))
-            elif key == 'mention':
-                ret.append(target.mention)
 
         return ret
 
