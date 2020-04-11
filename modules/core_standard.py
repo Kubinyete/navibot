@@ -5,7 +5,7 @@ import datetime
 import math
 import discord
 
-from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel
+from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType
 from navibot.errors import CommandError
 from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string
 
@@ -16,7 +16,7 @@ class CHelp(BotCommand):
             name = "help",
             aliases = ['h'],
             description = "Demonstra informações sobre todos os comandos disponibilizados.",
-            usage = "{name} [cmd]"
+            usage = "[cmd]"
         )
 
     async def run(self, message, args, flags):
@@ -43,8 +43,9 @@ class CHelp(BotCommand):
 
             text += f"`{key}` ({mdlstr}.{typestr})\n"
 
-        embed = self.create_response_embed(message, text)
+        embed = self.create_response_embed(message)
         embed.title = "NaviBot"
+        embed.description = text
 
         return embed
 
@@ -55,15 +56,14 @@ class CAvatar(BotCommand):
             name = "avatar",
             aliases = ['av'],
             description = "Retorna o avatar da Guild ou indivíduo mencionado.",
-            usage = "{name} [@Usuario] [--guild] [--url] [--size=256]"
+            usage = "[@Usuario] [--guild] [--url] [--size=256]"
         )
 
     async def run(self, message, args, flags):
         target = None
 
         if not 'guild' in flags:
-            mentions = flags.get('mentions', None)
-
+            mentions = flags['mentions']
             target = mentions[0] if mentions else None
         else:
             target = message.guild
@@ -98,16 +98,18 @@ class CRemind(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
+            enable_usermap = True,
             name = "remind",
             aliases = ['re'],
             description = "Registra um determinado lembrete de acordo com o tempo de espera `--time` informado.",
-            usage = "{name} --time=1h30m [--list] [--remove=ID] [--clear] [lembrete...]",
-            enable_usermap = True
+            usage = "--time=1h30m [--list] [--remove=ID] [--clear] [lembrete...]"
         )
 
         self.limit = 3
 
     async def run(self, message, args, flags):
+        assert message.author
+
         stored = self.get_user_storage(message.author)
 
         if 'list' in flags:
@@ -135,7 +137,8 @@ class CRemind(BotCommand):
 
             if cid >= 0 and cid < len(stored):
                 stored.remove(stored[cid])
-                await message.add_reaction('✅')
+
+                return ReactionType.SUCCESS
             else:
                 raise CommandError("O identificador informado ao argumento `--remove` não existe.")
         elif 'clear' in flags:
@@ -159,26 +162,32 @@ class CRemind(BotCommand):
                 raise CommandError(f"O tempo de espera `--time` informado não está em um formato válido ou ultrapassa o limite de 24 horas.")
 
             if len(stored) < self.limit:
-                t = TimeoutContext(seconds, self.callable_send_reminder, callback=self.callable_free_reminder, author=message.author, text=text if text else f"Lembrete #{len(stored) + 1}", timestamp=time.time())
+                t = TimeoutContext(
+                    seconds, 
+                    self.callable_send_reminder, 
+                    callback=self.callable_free_reminder, 
+                    ctx=message, 
+                    text=text if text else f"Lembrete #{len(stored) + 1}",
+                    timestamp=time.time()
+                )
+
                 stored.append(t)
                 t.create_task()
-                await message.add_reaction('✅')
+
+                return ReactionType.SUCCESS
             else:
                 raise CommandError(f"Você atingiu o limite de {self.limit} lembretes registrados, por favor tente mais tarde.")
         
     async def callable_send_reminder(self, reminder, kwargs):
-        author = kwargs.get('author', None)
+        ctx = kwargs['ctx']
         text = kwargs.get('text', None)
 
-        assert author
-
-        await author.send(f":bell: Olá <@{author.id}>, estou te avisando sobre um **lembrete**!" if not text else f":bell: Olá <@{author.id}>, estou te avisando sobre:\n`{text}`")
+        await ctx.author.send(f":bell: Olá <@{ctx.author.id}>, estou te avisando sobre um **lembrete**!" if not text else f":bell: Olá <@{ctx.author.id}>, estou te avisando sobre:\n`{text}`")
 
     async def callable_free_reminder(self, reminder, kwargs):
-        author = kwargs.get('author', None)
-        assert author
+        ctx = kwargs['ctx']
 
-        stored = self.get_user_storage(author)
+        stored = self.get_user_storage(ctx.author)
         assert stored
 
         try:
@@ -193,11 +202,11 @@ class CSpotify(BotCommand):
             name = "spotify",
             aliases = ['sptfy'],
             description = "Retorna informações da atividade Spotify que o usuário esteja realizando.",
-            usage = "{name} @Usuario"
+            usage = "@Usuario"
         )
 
     async def run(self, message, args, flags):
-        mentions = flags.get('mentions', None)
+        mentions = flags['mentions']
 
         target = mentions[0] if mentions else None
 
@@ -230,7 +239,7 @@ class CEmbed(BotCommand):
             name = "embed",
             aliases = ['emb'],
             description = "Retorna um Embed de acordo com os parâmetros informados.",
-            usage = '{name} [-t "titulo"] [-d "descricao"] [-img "url"] [-timg "url"]'
+            usage = '[-t "titulo"] [-d "descricao"] [-img "url"] [-timg "url"]'
         )
 
     async def run(self, message, args, flags):

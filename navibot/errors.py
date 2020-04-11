@@ -15,3 +15,7 @@ class ParserError(Exception):
 # Utilizado pelo comando para abortar a execução.
 class CommandError(Exception):
     pass
+
+# Utilizado por erros relacionados ao banco de dados embutido.
+class DatabaseError(Exception):
+    pass

@@ -3,7 +3,7 @@ import asyncio
 import logging
 import aiohttp
 
-from navibot.client import BotCommand, InterpretedCommand, PermissionLevel
+from navibot.client import BotCommand, InterpretedCommand, PermissionLevel, ReactionType
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
 
@@ -12,9 +12,8 @@ class CSetAvatar(BotCommand):
         super().__init__(
             bot,
             name = "setavatar",
-            aliases = ['stavatar'],
             description = "Edita o perfil do bot atual, recebe um URL da imagem nova de perfil, a qual será baixada e enviada.",
-            usage = "{name} URL",
+            usage = "URL",
             permissionlevel = PermissionLevel.BOT_OWNER
         )
 
@@ -41,7 +40,7 @@ class CSetAvatar(BotCommand):
             await asyncio.wait_for(
                 self.bot.client.user.edit(
                     avatar=avatar_bytes
-                ), 60
+                ), 30
             )
         except discord.InvalidArgument as e:
             logging.error(e)
@@ -53,16 +52,15 @@ class CSetAvatar(BotCommand):
             logging.error(e)
             raise CommandError("Não foi possível editar o perfil do bot, o tempo limite de envio foi excedido.")
             
-        await message.add_reaction('✅')
+        return ReactionType.SUCCESS
 
 class CSetName(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
             name = "setname",
-            aliases = ['stname'],
             description = "Edita o perfil do bot atual, recebe um novo nome de usuário.",
-            usage = "{name} [nome...]",
+            usage = "[nome...]",
             permissionlevel = PermissionLevel.BOT_OWNER
         )
 
@@ -83,22 +81,22 @@ class CSetName(BotCommand):
             logging.error(e)
             raise CommandError("Não foi possível editar o perfil do bot.")
             
-        await message.add_reaction('✅')
+        return ReactionType.SUCCESS
 
 class CGuildVariables(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = 'var',
-            aliases = ['v', 'var', 'gv', 'gvar'],
+            name = 'guildvariable',
+            aliases = ['var', 'gvar'],
             description = "Gerencia as variáveis da Guild atual.",
-            usage = "{name} variavel [novo valor] [--list]",
+            usage = "variavel [novo valor] [--list]",
             permissionlevel=PermissionLevel.BOT_OWNER
         )
 
     async def run(self, message, args, flags):
         gsm = self.get_guild_settings_manager()
-        gvars = await gsm.get_guild_variables(message.channel.guild.id)
+        gvars = await gsm.get_guild_variables(message.guild.id)
 
         if 'list' in flags:
             text = ''
@@ -123,7 +121,7 @@ class CGuildVariables(BotCommand):
                         raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
 
                     if await gsm.update_guild_variable(expected_variable):
-                        await message.add_reaction('✅')
+                        return ReactionType.SUCCESS
                     else:
                         expected_variable.set_value(prev_value)
                         raise CommandError(f'Não foi possível modificar o valor da variável `{args[0]}`.')
@@ -137,9 +135,8 @@ class CAddCommand(BotCommand):
         super().__init__(
             bot,
             name = "addcommand",
-            aliases = ['addcmd'],
             description = "Adiciona um comando interpretado.",
-            usage = '{name} nome [comando...]',
+            usage = 'nome [comando...]',
             permissionlevel = PermissionLevel.BOT_OWNER
         )
 
@@ -163,4 +160,4 @@ class CAddCommand(BotCommand):
             logging.error(e)
             raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n{e}')
 
-        await message.add_reaction('✅')
+        return ReactionType.SUCCESS

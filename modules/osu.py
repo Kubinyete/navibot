@@ -12,7 +12,7 @@ class COsu(BotCommand):
             name = "osu",
             aliases = ['os'],
             description = "Exibe um Slider com informações sobre o perfil do usuário e as suas melhores performances.",
-            usage = "{name} username [--mode=osu|taiko|ctb|mania]"
+            usage = "username [--mode=osu|taiko|ctb|mania]"
         )
 
         self.api = OsuApi(
@@ -80,7 +80,7 @@ class COsu(BotCommand):
                 items.append(embed)
 
             return Slider(
-                self.bot.client, 
+                self.bot, 
                 message,
                 items
             )

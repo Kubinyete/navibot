@@ -15,7 +15,7 @@ class CEcho(BotCommand):
             name = 'echo',
             aliases = ['ec'],
             description = "Faz com que o bot repita a mensagem informada.",
-            usage = "{name} [texto...]"
+            usage = "[texto...]"
         )
 
     async def run(self, message, args, flags):
@@ -31,7 +31,7 @@ class CFullwidth(BotCommand):
             name = 'fullwidth',
             aliases = ['fw', 'vaporwave'],
             description = "Converte a mensagem recebida em uma mensagem com caracteres Ｕｎｉｃｏｄｅ　Ｆｕｌｌ-Ｗｉｄｔｈ.",
-            usage = "{name} [texto...]"
+            usage = "[texto...]"
         )
 
     async def run(self, message, args, flags):
@@ -47,7 +47,7 @@ class CClap(BotCommand):
             name = 'clap',
             aliases = ['cl'],
             description = "Converte a mensagem recebida em uma mensagem com :clap: embutidos.",
-            usage = "{name} [texto...]"
+            usage = "[texto...]"
         )
 
     async def run(self, message, args, flags):
@@ -63,7 +63,6 @@ class CTime(BotCommand):
             name = 'time',
             aliases = ['tm'],
             description = "Retorna o horário atual.",
-            usage = "{name}"
         )
 
     async def run(self, message, args, flags):
@@ -76,7 +75,6 @@ class CDate(BotCommand):
             name = 'date',
             aliases = ['dt'],
             description = "Retorna a data atual.",
-            usage = "{name}"
         )
 
     async def run(self, message, args, flags):
@@ -89,7 +87,7 @@ class CFormat(BotCommand):
             name = 'format',
             aliases = ['fmt'],
             description = "Aplica todas as alterações passadas por argumento.",
-            usage = "{name} [-u|--upper] [-l|--lower] [-r|--reverse]"
+            usage = "[-u|--upper] [-l|--lower] [-r|--reverse]"
         )
 
     def transform(self, transf, flags):
@@ -116,7 +114,7 @@ class CChoice(BotCommand):
             name = 'choice',
             aliases = ['cc'],
             description = "Escolhe aleatóriamente um dos argumentos informados.",
-            usage = "{name} [arg1] [argN...]"
+            usage = "[arg1] [argN...]"
         )
 
     async def run(self, message, args, flags):
@@ -130,9 +128,9 @@ class CRoll(BotCommand):
         super().__init__(
             bot,
             name = "roll",
-            aliases = ['r'],
+            aliases = ['dice'],
             description = "Retorna um número aleatório entre [min] e [max].",
-            usage = "{name} [min] [max]"
+            usage = "[min] [max]"
         )
 
     async def run(self, message, args, flags):
@@ -160,7 +158,7 @@ class CExpressionParser(BotCommand):
             name = "expr",
             aliases = ['calc', 'bc'],
             description = "Calcula a expressão matemática informada (Ex: 1 + 2 (2 / 4) * 9).",
-            usage = "{name} [expressao...]"
+            usage = "[expressao...]"
         )
 
     async def run(self, message, args, flags):
@@ -181,9 +179,9 @@ class CGetMember(BotCommand):
         super().__init__(
             bot,
             name = "getmember",
-            aliases = ['gmember', 'gmem'],
+            aliases = ['member'],
             description = "Retorna uma ou mais propriedades desejadas do membro mencionado.",
-            usage = "{name} @Usuario [--self] [--name|--id|--nick|--display_name|--mention]"
+            usage = "[@Usuario] [--self] [--name|--id|--nick|--display_name|--mention]"
         )
 
         self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status')
@@ -201,7 +199,7 @@ class CGetMember(BotCommand):
 
         ret = []
 
-        for key, value in flags.items():
+        for key in flags.keys():
             if key in self.allowed_attr:
                 tmp = getattr(target, key, None)
 
@@ -217,9 +215,9 @@ class CGetArg(BotCommand):
         super().__init__(
             bot,
             name = "getarg",
-            aliases = ['garg', 'arg'],
+            aliases = ['arg'],
             description = "Retorna uma ou mais argumentos recebidos de um comando interpretado que seja o ativador.",
-            usage = "{name} indice [--all]"
+            usage = "indice [--all]"
         )
 
     async def run(self, message, args, flags):

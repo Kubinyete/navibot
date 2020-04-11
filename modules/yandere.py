@@ -14,7 +14,7 @@ class CYandere(BotCommand):
             name = "yandere",
             aliases = ['ynd'],
             description = "Exibe um Slider de uma ou mais imagens retornadas pela API do site yande.re de acordo com as tags informadas por argumento.",
-            usage = "{name} [--post] [tag1] [tagN]... [--page=1] | --tag [tagname1...]"
+            usage = "[--post] [tag1] [tagN]... [--page=1] | --tag [tagname1...]"
         )
 
         self.api = YandereApi()
@@ -50,18 +50,24 @@ class CYandere(BotCommand):
             description = ""
             for tag in tag_json:
                 if i and i % self.tags_per_embed == 0:
-                    embed = self.create_response_embed(message, description=description)
+                    embed = self.create_response_embed(message)
+                
+                    embed.description = description
                     embed.title = f"Lista de tag(s)"
                     items.append(embed)
+
                     description = ""
 
                 description += f"`{tag['name']}` ({self.api.tagtype_string(tag['type'])}) ({tag['count']})\n"
                 i += 1
 
             if i % self.tags_per_embed != 0:
-                embed = self.create_response_embed(message, description=description)
+                embed = self.create_response_embed(message)
+
+                embed.description = description
                 embed.title = f"Lista de tag(s)"
                 items.append(embed)
+
                 description = ""
         else:
             gsm = self.get_guild_settings_manager()
@@ -96,7 +102,7 @@ class CYandere(BotCommand):
                     items.append(embed)
 
         return Slider(
-            self.bot.client, 
+            self.bot, 
             message,
             items
         ) if items else f":warning: Nenhum resultado encontrado para `{inputstr}`"

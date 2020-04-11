@@ -12,7 +12,7 @@ class CSteam(BotCommand):
             name = "steam",
             aliases = ['stm'],
             description = "Exibe um perfil Steam da comunidade.",
-            usage = "{name} STEAMID|CUSTOMURL"
+            usage = "steamID|customURL"
         )
 
         self.api = SteamApi(
@@ -84,7 +84,7 @@ class CSteam(BotCommand):
             items.append(embed)
 
             return Slider(
-                self.bot.client,
+                self.bot,
                 message,
                 items
             )

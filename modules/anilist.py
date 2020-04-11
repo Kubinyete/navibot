@@ -12,7 +12,7 @@ class CAnilist(BotCommand):
             name = "anilist",
             aliases = ['anl'],
             description = "Exibe um Slider com o resultados de uma pesquisa por personagens utilizando `--character`.",
-            usage = "{name} [-c|--character] [busca...] [page=1]"
+            usage = "[-c|--character] [busca...] [page=1]"
         )
 
         self.api = AniListApi()
@@ -45,7 +45,7 @@ class CAnilist(BotCommand):
                     items.append(embed)
 
                 return Slider(
-                    self.bot.client,
+                    self.bot,
                     message,
                     items
                 )
