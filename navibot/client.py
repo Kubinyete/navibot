@@ -94,12 +94,17 @@ class Command:
         raise NotImplementedError()
 
 class BotCommand(Command):
-    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, enable_usermap: bool=False, **kwargs):
+    # @TODO:
+    # Parar de usar enable_usermap, pensar em uma outra forma de possuir uma "memória volátil"
+    # para os comandos usarem dependendo do contexto
+    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, visible: bool=True, enable_usermap: bool=False, **kwargs):
         super().__init__(bot)
 
         self.update_info(kwargs)
 
         self.permissionlevel = permissionlevel
+        self.visible = visible
+
         self.enable_usermap = enable_usermap
         
         if self.enable_usermap:
@@ -134,7 +139,7 @@ class BotCommand(Command):
         raise NotImplementedError()
 
 class InterpretedCommand(BotCommand):
-    def __init__(self, bot, name: str, command: str, permissionlevel: PermissionLevel=PermissionLevel.NONE):
+    def __init__(self, bot, name: str, command: str, permissionlevel: PermissionLevel=PermissionLevel.NONE, visible: bool=True):
         super().__init__(bot, permissionlevel=permissionlevel, enable_usermap=False, name=name)
 
         self.command = command
@@ -160,6 +165,38 @@ class InterpretedCommand(BotCommand):
 class CommandAlias:
     def __init__(self, origin: BotCommand):
         self.origin = origin
+
+class ModuleHook:
+    def __init__(self, bot):
+        self.bot = bot
+        self.binded_events_ids = []
+
+    def bind_event(self, eventname: str, coroutinefunc: callable, name: str=None):
+        self.binded_events_ids.append(
+            (
+                eventname,
+                self.bot.client.register_event(
+                    eventname,
+                    coroutinefunc,
+                    name=name
+                )
+            )
+        )
+
+    def clear_binded_events(self):
+        for event, eid in self.binded_events_ids:
+            self.bot.client.remove_event(
+                event,
+                eid
+            )
+
+    def get_guild_settings_manager(self):
+        assert self.bot.guildsettings
+
+        return self.bot.guildsettings
+
+    def run(self):
+        raise NotImplementedError()
 
 class TimeoutContext:
     def __init__(self, waitfor: int, callable: callable, callback: callable=None, **kwargs):
@@ -237,6 +274,9 @@ class Client(discord.Client):
 
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
         await self.dispatch_event('reaction_add', reaction=reaction, user=user)
+
+    async def on_member_join(self, member: discord.Member):
+        await self.dispatch_event('on_member_join', member=member)
 
     def listen(self, token):
         self.run(token)
@@ -325,8 +365,10 @@ class Bot:
 
         # Dicionário de comandos
         self.commands = {}
+        # Lista de hooks acoplados
+        self.hooks = []
 
-        # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules
+        # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
         self.load_modules(f'{self.curr_path}/modules')
         
         # Carrega os comandos interpretados definidos na chave específicada.
@@ -338,7 +380,7 @@ class Bot:
         # Nosso gerênciador de variáveis por Guild.
         self.guildsettings = GuildSettingsManager(
             self, 
-            defaultvalues=self.config.get('guild_settings')
+            self.config.get('guild_settings', {})
         )
 
     async def get_database_connection(self):
@@ -362,22 +404,34 @@ class Bot:
             for file in iterator:
                 if file.name.endswith('.py') and file.is_file():
                     mod = importlib.import_module(f"{dirpath[len(os.path.dirname(dirpath)) + 1:].replace('/', '.')}.{file.name[:-3]}")
-                    self.load_commands_from_module(mod)
+                    self.load_objects_from_module(mod)
 
-    def load_commands_from_module(self, mod):
+    def load_objects_from_module(self, mod):
         logging.info(f"Attempting to load commands from module: {mod}")
         
-        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand):
+        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and (is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand or is_subclass(x, ModuleHook) and x != ModuleHook)):
             cmd = obj[1](self)
 
-            assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
+            if is_instance(cmd, BotCommand):
+                assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
+                
+                if not cmd.visible:
+                    continue
 
-            self.commands[cmd.name.lower()] = cmd
+                self.commands[cmd.name.lower()] = cmd
 
-            for alias in cmd.aliases:
-                self.commands[alias.lower()] = CommandAlias(cmd)
+                for alias in cmd.aliases:
+                    self.commands[alias.lower()] = CommandAlias(cmd)
 
-            logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+                logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+            else:
+                assert is_instance(cmd, ModuleHook)
+                
+                self.hooks.append(cmd)
+
+                cmd.run()
+
+                logging.info(f"Successfully loaded a new hook: {mod.__name__}.{type(cmd).__name__} ({cmd})")
 
     def add_interpreted_command(self, command: InterpretedCommand):
         logging.info(f"Adding interpreted command: {command.name} ({command})")
@@ -386,9 +440,24 @@ class Bot:
             if isinstance(self.commands[command.name], InterpretedCommand):
                 self.commands[command.name] = command
             else:
-                raise Exception(f'O comando {command.name} já existe e não pode ser substituido.')
+                raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
         else:
             self.commands[command.name] = command
+
+    def remove_interpreted_command(self, name: str):
+        if name in self.commands:
+            command = self.commands[name]
+            
+            if isinstance(command, InterpretedCommand):
+                logging.info(f"Removing interpreted command: {command.name} ({command})")
+
+                del self.commands[name]
+            else:
+                raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
+
+            return command
+        else:
+            raise BotError(f'O comando {name} não existe.')
 
     def load_interpreted_commands(self, keystr: str):
         for command in self.config.get(keystr, []):
@@ -412,6 +481,29 @@ class Bot:
             text=ctx.author.name, 
             icon_url=ctx.author.avatar_url_as(size=32)
         )
+
+    def has_permission_level(self, command: BotCommand, ctx: Context):
+        assert ctx.author
+        assert ctx.guild
+
+        if command.permissionlevel is PermissionLevel.NONE:
+            return True
+        elif command.permissionlevel is PermissionLevel.BOT_OWNER:
+            return ctx.author.id in self.config.get('global.owner_ids', [])
+        else:
+            currlevel = None
+            permissions = ctx.channel.permissions_for(ctx.author)
+
+            if permissions.kick_members or permissions.ban_members:
+                currlevel = PermissionLevel.GUILD_MOD
+            
+            if permissions.administrator:
+                currlevel = PermissionLevel.GUILD_ADMIN
+
+            if ctx.guild.owner == ctx.author:
+                currlevel = PermissionLevel.GUILD_OWNER
+            
+            return currlevel.value >= command.permissionlevel.value if currlevel else False
 
     def extract_mentions_from(self, args: list, flags: dict, ctx: Context):
         assert ctx.guild
@@ -485,8 +577,11 @@ class Bot:
         if not ctx.message.content.startswith(prefix):
             return
         
+        await self.handle_command_parse(ctx, ctx.message.content[len(prefix):])
+
+    async def handle_command_parse(self, ctx: Context, content: str):
         parser = CommandParser(
-            ctx.message.content[len(prefix):]
+            content
         )
  
         try:
@@ -499,29 +594,6 @@ class Bot:
         except (ParserError, BotError, PermissionLevelError, CommandError, DatabaseError) as e:
             # Exception "amigável", envie isso no contexto atual de volta para o usuário
             await ctx.reply(e)
-
-    def has_permission_level(self, command: BotCommand, ctx: Context):
-        assert ctx.author
-        assert ctx.guild
-
-        if command.permissionlevel is PermissionLevel.NONE:
-            return True
-        elif command.permissionlevel is PermissionLevel.BOT_OWNER:
-            return ctx.author.id in self.config.get('global.owner_ids', [])
-        else:
-            currlevel = None
-            permissions = ctx.channel.permissions_for(ctx.author)
-
-            if permissions.kick_members or permissions.ban_members:
-                currlevel = PermissionLevel.GUILD_MOD
-            
-            if permissions.administrator:
-                currlevel = PermissionLevel.GUILD_ADMIN
-
-            if ctx.guild.owner == ctx.author:
-                currlevel = PermissionLevel.GUILD_OWNER
-            
-            return currlevel.value >= command.permissionlevel.value if currlevel else False
 
     async def handle_pipeline_execution(self, ctx: Context, pipeline, activator_args: list=None, activator_flags: dict=None):
         pipeline_output = ''
@@ -648,66 +720,95 @@ class Bot:
             kwargs['index'] = index + 1
 
 class GuildSettingsManager:
-    def __init__(self, bot: Bot, defaultvalues: dict={}):
+    def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=300):
         self.bot = bot
-        self.defaultvalues = defaultvalues
+        self.default_values = default_values
         self.guildmap = {}
+        self.cache_timelimit = cache_timelimit
 
     async def get_database_connection(self):
         return await self.bot.get_database_connection()
 
-    async def initialize_guild_variables(self, guildid: int):
-        if not guildid in self.guildmap:
-            self.guildmap[guildid] = dict(self.defaultvalues)
+    async def get_cacheable_guild_variable(self, guildid: int, key: str):
+        dal = GuildVariableDAL(await self.get_database_connection())
 
-            for key, value in self.guildmap[guildid].items():
-                self.guildmap[guildid][key] = GuildVariable(
+        if not guildid in self.guildmap:
+            self.guildmap[guildid] = {}
+
+        if key in self.guildmap[guildid] and time.time() - self.guildmap[guildid][key].fetched_at < self.cache_timelimit:
+            currvar = self.guildmap[guildid][key]
+        else:
+            currvar = await dal.get_variable(guildid, key)
+
+            if currvar:
+                currvar.fetched_at = time.time()
+                self.guildmap[guildid][key] = currvar
+
+        return currvar
+        
+    async def get_guild_variable(self, guildid: int, key: str):
+        var = await self.get_cacheable_guild_variable(guildid, key)
+
+        if not var:
+            default = self.default_values.get(key, None)
+
+            if default != None:
+                var = GuildVariable( 
+                    guildid,
+                    key,
+                    default,
+                    None
+                )
+
+        return var
+
+    async def get_all_guild_variables(self, guildid: int):
+        dal = GuildVariableDAL(await self.get_database_connection())
+
+        if not guildid in self.guildmap:
+            self.guildmap[guildid] = {}
+
+        tm = time.time()
+        for var in await dal.get_all_variables(guildid):
+            var.fetched_at = tm
+            self.guildmap[guildid][var.key] = var
+
+        dictview = dict(self.guildmap[guildid])
+        for key, value in self.default_values.items():
+            if not key in dictview:
+                dictview[key] = GuildVariable( 
                     guildid,
                     key,
                     value,
                     None
                 )
 
-            dal = GuildVariableDAL(await self.get_database_connection())
-            
-            for variable in await dal.get_all_variables(guildid):
-                self.guildmap[variable.guildid][variable.key] = variable
-
-    async def get_guild_variable(self, guildid: int, key: str, default=None):
-        await self.initialize_guild_variables(guildid)
-        
-        return self.guildmap[guildid].get(key, default)
-
-    async def get_guild_variables(self, guildid: int):
-        await self.initialize_guild_variables(guildid)
-        
-        return self.guildmap[guildid]
+        return dictview
 
     async def update_guild_variable(self, variable: GuildVariable):
         dal = GuildVariableDAL(await self.get_database_connection())
 
-        ok = await dal.update_variable(variable)
-
-        # @TODO:
-        # Arrumar essa lógica aqui, não é possível determinar se o select falhou pois
-        # a conexão do databases.Database não retorna a quantidade de linhas alteradas
-        # ou pelomenos deveria estar mas não está.
-        if not ok:
-            # Não existe ainda, crie
-            return await dal.create_variable(variable)
+        if variable.key in self.guildmap[variable.guildid]:
+            # Já temos no banco
+            return await dal.update_variable(variable)
         else:
+            ok = await dal.create_variable(variable)
+
+            if ok:
+                self.guildmap[variable.guildid][variable.key] = variable
+                variable.fetched_at = time.time()
+
             return ok
 
     async def remove_guild_variable(self, variable: GuildVariable):
-        # Isso vai voltar para o valor padrão
         dal = GuildVariableDAL(await self.get_database_connection())
 
-        if await dal.remove_variable(variable):
-            variable.set_value(self.defaultvalues[variable.key])
+        ok = await dal.remove_variable(variable)
 
-            return True
+        if ok and variable.key in self.guildmap[variable.guildid]:
+            del self.guildmap[variable.guildid][variable.key]
 
-        return False
+        return ok
 
 class Slider:
     def __init__(self, bot: Bot, ctx: Context, items: list, reaction_right: str=r'▶️', reaction_left: str=r'◀️', restricted: bool=False, startat: int=0, timeout: int=60):

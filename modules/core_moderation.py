@@ -1,6 +1,7 @@
+import asyncio
 import logging
 
-from navibot.client import BotCommand, ReactionType, PermissionLevel
+from navibot.client import BotCommand, ModuleHook, Context, ReactionType, PermissionLevel
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
 
@@ -104,3 +105,34 @@ class CSetWelcomeMessage(BotCommand):
                 return ReactionType.SUCCESS
             else:
                 return ReactionType.FAILURE
+
+class HWelcomeMessage(ModuleHook):
+    async def callable_receive_member_join(self, kwargs):
+        member = kwargs.get('member')
+
+        gsm = self.get_guild_settings_manager()
+
+        # Tentei usar gather aqui, mas da Exception por alguma razão dentro do aiomysql
+        vc = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id')
+        vm = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+
+        if vc and vc.get_value() and vm and vm.get_value():
+            channel = member.guild.get_channel(vc.get_value())
+
+            if channel:
+                await self.bot.handle_command_parse(
+                    Context(
+                        self.bot,
+                        channel,
+                        member.guild,
+                        member
+                    ),
+                    vm.get_value()
+                )
+    
+    def run(self):
+        self.bind_event(
+            'on_member_join',
+            self.callable_receive_member_join
+        )
+

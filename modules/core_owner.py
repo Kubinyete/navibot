@@ -96,7 +96,7 @@ class CGuildVariables(BotCommand):
 
     async def run(self, message, args, flags):
         gsm = self.get_guild_settings_manager()
-        gvars = await gsm.get_guild_variables(message.guild.id)
+        gvars = await gsm.get_all_guild_variables(message.guild.id)
 
         if 'list' in flags:
             text = ''
@@ -161,3 +161,43 @@ class CAddCommand(BotCommand):
             raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n{e}')
 
         return ReactionType.SUCCESS
+
+class CRemoveCommand(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "removecommand",
+            description = "Remove um comando interpretado.",
+            usage = 'nome',
+            permissionlevel = PermissionLevel.BOT_OWNER
+        )
+
+    async def run(self, message, args, flags):
+        if not args:
+            return self.get_usage_embed(message)
+
+        try:
+            self.bot.remove_interpreted_command(args[0])
+        except Exception as e:
+            logging.error(e)
+            raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n{e}')
+
+        return ReactionType.SUCCESS
+
+class CSimulateMemberJoin(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "simulatememberjoin",
+            description = "Simula um evento on_member_join, utilizando o autor deste comando como parâmetro.",
+            permissionlevel = PermissionLevel.BOT_OWNER
+        )
+
+    async def run(self, message, args, flags):
+        assert message.author
+
+        await self.bot.client.dispatch_event(
+            'on_member_join',
+            member=message.author
+        )
+        

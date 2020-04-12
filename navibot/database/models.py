@@ -24,10 +24,11 @@ class VariableType(Enum):
         )
 
 class GuildVariable:
-    def __init__(self, guildid: int, key: str, value, valuetype: VariableType):
+    def __init__(self, guildid: int, key: str, value, valuetype: VariableType, fetched_at: int=0):
         self.guildid = guildid
         self.key = key
         self.valuetype = valuetype or VariableType.get_enum_for_type(type(value))
+        self.fetched_at = fetched_at
 
         self.set_value(value)
 

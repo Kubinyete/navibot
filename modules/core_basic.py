@@ -166,7 +166,7 @@ class CExpressionParser(BotCommand):
             return self.get_usage_embed(message)
 
         try:
-            return str(ExpressionParser(''.join(args)).parse().evaluate())
+            return str(ExpressionParser(' '.join(args)).parse().evaluate())
         except ParserError as e:
             raise CommandError(f'Ocorreu um erro durante a execução do parser:\n{e}')
         except OverflowError:

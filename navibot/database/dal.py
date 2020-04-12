@@ -54,7 +54,6 @@ class GuildVariableDAL(BaseDAL):
                 }
             )
 
-        logging.info(f'GuildVariableDAL: received ok = {ok}')
         return ok >= 0
 
     async def update_variable(self, variable: GuildVariable):
@@ -69,7 +68,6 @@ class GuildVariableDAL(BaseDAL):
                 }
             )
 
-        logging.info(f'GuildVariableDAL: received ok = {ok}')
         return ok >= 0
 
     async def remove_variable(self, variable: GuildVariable):
@@ -82,6 +80,5 @@ class GuildVariableDAL(BaseDAL):
                 }
             )
 
-        logging.info(f'GuildVariableDAL: received ok = {ok}')
         return ok >= 0
     
