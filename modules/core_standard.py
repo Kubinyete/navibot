@@ -5,7 +5,7 @@ import datetime
 import math
 import discord
 
-from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType
+from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType, Slider
 from navibot.errors import CommandError
 from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string
 
@@ -19,8 +19,10 @@ class CHelp(BotCommand):
             usage = "[cmd]"
         )
 
+        self.commands_per_page = 20
+
     async def run(self, message, args, flags):
-        text = "**NaviBot** é um bot **experimental** escrito utilizando a biblioteca [discord.py](https://github.com/Rapptz/discord.py) por razões de aprendizado, mais específicamente para experimentar com o asyncio e também conseguir construir e replicar algumas funcionalidades que já vi serem implementadas."
+        text = "**Navibot** é um bot **experimental** escrito utilizando a biblioteca [discord.py](https://github.com/Rapptz/discord.py) por razões de aprendizado, mais específicamente para experimentar com o asyncio e também conseguir construir e replicar algumas funcionalidades que já vi serem implementadas."
         text += f"\n\n:information_source: Digite `help [comando]` para obter mais informações."
         text += f"\n\n**Comandos disponíveis**:\n\n"
 
@@ -34,20 +36,40 @@ class CHelp(BotCommand):
             else:
                 raise CommandError(f"O comando `{args[0]}` não existe.")
 
+        embeds = [self.create_response_embed(message)]
+        curr = embeds[0]
+        
+        # curr.set_thumbnail(url=self.bot.client.user.avatar_url_as(size=256))
+
+        i = 1
         for key, value in self.bot.commands.items():
             if is_instance(value, CommandAlias):
                 continue
+            elif i % self.commands_per_page == 0:
+                curr.title = "Navibot"
+                curr.description = str(text)
+
+                text = ''
+
+                curr = self.create_response_embed(message)
+                embeds.append(curr)
 
             typestr = type(value).__name__
             mdlstr = type(value).__module__
 
             text += f"`{key}` ({mdlstr}.{typestr})\n"
 
-        embed = self.create_response_embed(message)
-        embed.title = "NaviBot"
-        embed.description = text
+            i += 1
 
-        return embed
+        curr.title = "Navibot"
+        curr.description = text
+
+        return Slider(
+            self.bot,
+            message,
+            embeds,
+            restricted=True
+        )
 
 class CAvatar(BotCommand):
     def __init__(self, bot):
