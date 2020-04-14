@@ -89,7 +89,7 @@ class CDate(InterpretedCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = 'time',
+            name = 'date',
             command = 'dateformat %d/%m/%Y'
         )
 
