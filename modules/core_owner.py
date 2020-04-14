@@ -17,13 +17,17 @@ class CSetAvatar(BotCommand):
             permissionlevel = PermissionLevel.BOT_OWNER
         )
 
-        self.httpsession = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60))
+        self.httpsession = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60)
+        )
+
+        self.discord_edit_timeout = 30
 
     async def run(self, message, args, flags):
         if not args:
             return self.get_usage_embed(message)
 
-        avatar_url = ''.join(args)
+        avatar_url = ' '.join(args)
         avatar_bytes = None
 
         try:
@@ -32,7 +36,8 @@ class CSetAvatar(BotCommand):
                     avatar_bytes = await resp.read()
                 else:
                     raise CommandError("Não foi possível obter o novo avatar através da URL fornecida, o destino não retornou OK.")
-        except aiohttp.ClientError:
+        except aiohttp.ClientError as e:
+            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível obter o novo avatar através da URL fornecida.")
 
         try:
@@ -40,16 +45,16 @@ class CSetAvatar(BotCommand):
             await asyncio.wait_for(
                 self.bot.client.user.edit(
                     avatar=avatar_bytes
-                ), 30
+                ), self.discord_edit_timeout
             )
         except discord.InvalidArgument as e:
-            logging.error(e)
+            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("O formato de imagem fornecido não é suportado pelo Discord, favor informar os formatos (JPEG, PNG).")
         except discord.HTTPException as e:
-            logging.error(e)
+            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível editar o perfil do bot.")
         except asyncio.TimeoutError as e:
-            logging.error(e)
+            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível editar o perfil do bot, o tempo limite de envio foi excedido.")
             
         return ReactionType.SUCCESS
@@ -64,6 +69,8 @@ class CSetName(BotCommand):
             permissionlevel = PermissionLevel.BOT_OWNER
         )
 
+        self.discord_edit_timeout = 10
+
     async def run(self, message, args, flags):
         if not args:
             return self.get_usage_embed(message)
@@ -75,10 +82,10 @@ class CSetName(BotCommand):
             await asyncio.wait_for(
                 self.bot.client.user.edit(
                     username=username
-                ), 10
+                ), self.discord_edit_timeout
             )
         except (discord.InvalidArgument, discord.HTTPException, asyncio.TimeoutError) as e:
-            logging.error(e)
+            logging.exception(f'CSETNAME: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível editar o perfil do bot.")
             
         return ReactionType.SUCCESS
@@ -105,30 +112,41 @@ class CGuildVariables(BotCommand):
 
             return text
         else:
-            if args:
+            if not args:
+                return self.get_usage_embed(message)
+
+            try:
+                expected_variable = gvars[args[0]]
+            except KeyError:
+                raise CommandError(f'A variável `{args[0]}` não existe no contexto da Guild atual.')
+
+            if len(args) > 1:
+                new_value = ' '.join(args[1:])
+                prev_value = expected_variable.get_value()
+
                 try:
-                    expected_variable = gvars[args[0]]
-                except KeyError:
-                    raise CommandError(f'A variável `{args[0]}` não existe no contexto da Guild atual.')
+                    expected_variable.set_value(new_value)
+                except ValueError:
+                    raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
 
-                if len(args) > 1:
-                    new_value = ' '.join(args[1:])
-                    prev_value = expected_variable.get_value()
-
-                    try:
-                        expected_variable.set_value(new_value)
-                    except ValueError:
-                        raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
-
+                try:
                     if await gsm.update_guild_variable(expected_variable):
                         return ReactionType.SUCCESS
                     else:
                         expected_variable.set_value(prev_value)
-                        raise CommandError(f'Não foi possível modificar o valor da variável `{args[0]}`.')
-                else:
-                    return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
+                    
+                        return ReactionType.FAILURE
+                except Exception as e:
+                    logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
+                    
+                    expected_variable.set_value(prev_value)
+                    
+                    return ReactionType.FAILURE
             else:
-                return self.get_usage_embed(message)
+                # Sem formatação, pois podemos utilizar o valor da variável em outros comandos
+                # return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
+                
+                return expected_variable.get_value()
 
 class CAddCommand(BotCommand):
     def __init__(self, bot):
@@ -144,11 +162,9 @@ class CAddCommand(BotCommand):
         if len(args) < 2:
             return self.get_usage_embed(message)
 
-        try:
-            cmd = ' '.join(args[1:])
-            p = CommandParser(cmd)
-            p.parse()
-            
+        cmd = ' '.join(args[1:])
+
+        try:    
             self.bot.add_interpreted_command(
                 InterpretedCommand(
                     self.bot,
@@ -156,11 +172,12 @@ class CAddCommand(BotCommand):
                     cmd
                 )
             )
-        except Exception as e:
-            logging.error(e)
-            raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n{e}')
 
-        return ReactionType.SUCCESS
+            return ReactionType.SUCCESS
+        except Exception as e:
+            logging.exception(f'CADDCOMMAND: {type(e).__name__}: {e}')
+
+            raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n\n`{e}`')
 
 class CRemoveCommand(BotCommand):
     def __init__(self, bot):
@@ -178,26 +195,8 @@ class CRemoveCommand(BotCommand):
 
         try:
             self.bot.remove_interpreted_command(args[0])
+            
+            return ReactionType.SUCCESS
         except Exception as e:
-            logging.error(e)
-            raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n{e}')
-
-        return ReactionType.SUCCESS
-
-class CSimulateMemberJoin(BotCommand):
-    def __init__(self, bot):
-        super().__init__(
-            bot,
-            name = "simulatememberjoin",
-            description = "Simula um evento on_member_join, utilizando o autor deste comando como parâmetro.",
-            permissionlevel = PermissionLevel.BOT_OWNER
-        )
-
-    async def run(self, message, args, flags):
-        assert message.author
-
-        await self.bot.client.dispatch_event(
-            'on_member_join',
-            member=message.author
-        )
-        
+            logging.exception(f'CREMOVECOMMAND: {type(e).__name__}: {e}')
+            raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n\n`{e}`')

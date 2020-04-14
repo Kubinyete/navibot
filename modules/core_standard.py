@@ -19,7 +19,7 @@ class CHelp(BotCommand):
             usage = "[cmd]"
         )
 
-        self.commands_per_page = 20
+        self.commands_per_page = 30
 
     async def run(self, message, args, flags):
         text = "**Navibot** é um bot **experimental** escrito utilizando a biblioteca [discord.py](https://github.com/Rapptz/discord.py) por razões de aprendizado, mais específicamente para experimentar com o asyncio e também conseguir construir e replicar algumas funcionalidades que já vi serem implementadas."
@@ -39,8 +39,6 @@ class CHelp(BotCommand):
         embeds = [self.create_response_embed(message)]
         curr = embeds[0]
         
-        # curr.set_thumbnail(url=self.bot.client.user.avatar_url_as(size=256))
-
         i = 1
         for key, value in self.bot.commands.items():
             if is_instance(value, CommandAlias):
@@ -78,17 +76,23 @@ class CAvatar(BotCommand):
             name = "avatar",
             aliases = ['av'],
             description = "Retorna o avatar da Guild ou indivíduo mencionado.",
-            usage = "[@Usuario] [--guild] [--url] [--size=256]"
+            usage = "[@Usuario] [--self] [--guild] [--url] [--size=256]"
         )
 
     async def run(self, message, args, flags):
         target = None
 
-        if not 'guild' in flags:
+        if 'self' in flags:
+            assert message.author
+
+            target = message.author
+        elif 'guild' in flags:
+            assert message.guild
+
+            target = message.guild
+        else:
             mentions = flags['mentions']
             target = mentions[0] if mentions else None
-        else:
-            target = message.guild
         
         if not target:
             return self.get_usage_embed(message)
@@ -103,7 +107,7 @@ class CAvatar(BotCommand):
         except AssertionError:
             raise CommandError("O argumento `--size` deve estar entre 16 e 4096 e ser uma potência de 2 (Ex: 32, 64, 128...).")
 
-        icon_url = str(target.avatar_url_as(size=size) if isinstance(target, discord.Member) else target.icon_url_as(size=size))
+        icon_url = str(target.avatar_url_as(size=size) if isinstance(target, discord.User) else target.icon_url_as(size=size))
 
         if "url" in flags:
             return icon_url
@@ -189,7 +193,7 @@ class CRemind(BotCommand):
                     self.callable_send_reminder, 
                     callback=self.callable_free_reminder, 
                     ctx=message, 
-                    text=text if text else f"Lembrete #{len(stored) + 1}",
+                    text=text if text else f"Lembrete sem título",
                     timestamp=time.time()
                 )
 
@@ -204,7 +208,7 @@ class CRemind(BotCommand):
         ctx = kwargs['ctx']
         text = kwargs.get('text', None)
 
-        await ctx.author.send(f":bell: Olá <@{ctx.author.id}>, estou te avisando sobre um **lembrete**!" if not text else f":bell: Olá <@{ctx.author.id}>, estou te avisando sobre:\n`{text}`")
+        await ctx.author.send(f":bell: Olá <@{ctx.author.id}>, estou te avisando sobre um **lembrete**!" if not text else f":bell: Olá <@{ctx.author.id}>, estou te avisando sobre:\n\n{text}")
 
     async def callable_free_reminder(self, reminder, kwargs):
         ctx = kwargs['ctx']
@@ -283,8 +287,6 @@ class CEmbed(BotCommand):
                     embed.set_image(url=curritem)
                 elif key == 'timg':
                     embed.set_thumbnail(url=curritem)
-                else:
-                    raise CommandError(f'A flag {key} informada não existe.')
 
                 index += 1
             else:

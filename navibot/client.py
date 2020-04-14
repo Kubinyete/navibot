@@ -720,7 +720,7 @@ class Bot:
             kwargs['index'] = index + 1
 
 class GuildSettingsManager:
-    def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=300):
+    def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=600):
         self.bot = bot
         self.default_values = default_values
         self.guildmap = {}

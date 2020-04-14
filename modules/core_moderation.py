@@ -27,8 +27,14 @@ class CNsfw(BotCommand):
             else:
                 return f"Conteúdo NSFW está atualmente **{'desabilitado' if var.get_value() else 'habilitado'}** para esta Guild."
 
-            await gsm.update_guild_variable(var)
-            return ReactionType.SUCCESS
+            try:
+                if await gsm.update_guild_variable(var):
+                    return ReactionType.SUCCESS
+                else:
+                    return ReactionType.FAILURE
+            except Exception as e:
+                logging.exception(f'CNSFW: {type(e).__name__}: {e}')
+                return ReactionType.FAILURE
         else:
             raise CommandError('Variável `nsfw_disabled` não encontrado no contexto da Guild atual.')
 
@@ -62,9 +68,13 @@ class CSetWelcomeChannel(BotCommand):
             else:
                 var.set_value(channel.id)
 
-            if await gsm.update_guild_variable(var):
-                return ReactionType.SUCCESS
-            else:
+            try:
+                if await gsm.update_guild_variable(var):
+                    return ReactionType.SUCCESS
+                else:
+                    return ReactionType.FAILURE
+            except Exception as e:
+                logging.exception(f'CSETWELCOMECHANNEL: {type(e).__name__}: {e}')
                 return ReactionType.FAILURE
         else:
             raise CommandError('Variável `gst_welcome_channel_id` não encontrado no contexto da Guild atual.')
@@ -88,33 +98,54 @@ class CSetWelcomeMessage(BotCommand):
         gsm = self.get_guild_settings_manager()
         var = await gsm.get_guild_variable(message.guild.id, 'gst_welcome_channel_message')
 
-        if not var:
-            raise CommandError('Variável `gst_welcome_channel_message` não encontrado no contexto da Guild atual.')
-        else:
+        if var:
             cmd = ' '.join(args)
-            
-            try:
-                CommandParser(cmd).parse()
-            except Exception as e:
-                logging.error(e)
-                raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n{e}')
 
             var.set_value(cmd)
 
-            if await gsm.update_guild_variable(var):
-                return ReactionType.SUCCESS
-            else:
+            try:
+                if await gsm.update_guild_variable(var):
+                    return ReactionType.SUCCESS
+                else:
+                    return ReactionType.FAILURE
+            except Exception as e:
+                logging.exception(f'CSETWELCOMEMESSAGE: {type(e).__name__}: {e}')
                 return ReactionType.FAILURE
+        else:
+            raise CommandError('Variável `gst_welcome_channel_message` não encontrado no contexto da Guild atual.')
+
+class CSimulateMemberJoin(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "simulatememberjoin",
+            description = "Simula um evento on_member_join na Guild atual, utilizando o autor deste comando como parâmetro.",
+            permissionlevel = PermissionLevel.GUILD_MOD
+        )
+
+    async def run(self, message, args, flags):
+        assert message.author
+
+        await self.bot.client.dispatch_event(
+            'on_member_join',
+            member=message.author
+        )
+        
 
 class HWelcomeMessage(ModuleHook):
     async def callable_receive_member_join(self, kwargs):
         member = kwargs.get('member')
 
         gsm = self.get_guild_settings_manager()
+        await self.bot.get_database_connection()
 
-        # Tentei usar gather aqui, mas da Exception por alguma razão dentro do aiomysql
-        vc = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id')
-        vm = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+        # vc = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id')
+        # vm = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+
+        vc, vm = await asyncio.gather(
+            gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
+            gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+        )
 
         if vc and vc.get_value() and vm and vm.get_value():
             channel = member.guild.get_channel(vc.get_value())
@@ -135,4 +166,3 @@ class HWelcomeMessage(ModuleHook):
             'on_member_join',
             self.callable_receive_member_join
         )
-

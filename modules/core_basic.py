@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from random import randint, choice
 
-from navibot.client import BotCommand
+from navibot.client import BotCommand, InterpretedCommand
 from navibot.errors import CommandError, ParserError
 from navibot.util import string_fullwidth_alphanumeric
 from navibot.parser import ExpressionParser
@@ -56,29 +56,42 @@ class CClap(BotCommand):
 
         return f":clap: {' :clap: '.join(args)} :clap:"
 
-class CTime(BotCommand):
+class CDateFormat(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = 'dateformat',
+            aliases = ['datefmt'],
+            description = "Retorna a data ou horário formatado de acordo com a string informada (Ex: %H:%M:%S ou %d/%m/%Y).",
+            usage = 'formato'
+        )
+
+    async def run(self, message, args, flags):
+        if not args:
+            return self.get_usage_embed(message)
+
+        fmt = ' '.join(args)
+
+        try:
+            return datetime.now().strftime(fmt)
+        except Exception as e:
+            raise CommandError(f'Não foi possível formatar a data de acordo com o formato `{fmt}` informado:\n\n`{e}`')
+
+class CTime(InterpretedCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
             name = 'time',
-            aliases = ['tm'],
-            description = "Retorna o horário atual.",
+            command = 'dateformat %H:%M:%S'
         )
 
-    async def run(self, message, args, flags):
-        return f"{datetime.now().strftime('%H:%M:%S')}"
-
-class CDate(BotCommand):
+class CDate(InterpretedCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = 'date',
-            aliases = ['dt'],
-            description = "Retorna a data atual.",
+            name = 'time',
+            command = 'dateformat %d/%m/%Y'
         )
-
-    async def run(self, message, args, flags):
-        return f"{datetime.now().strftime('%d/%m/%Y')}"
 
 class CFormat(BotCommand):
     def __init__(self, bot):
@@ -130,7 +143,7 @@ class CRoll(BotCommand):
             name = "roll",
             aliases = ['dice'],
             description = "Retorna um número aleatório entre [min] e [max].",
-            usage = "[min] [max]"
+            usage = "[min=0] [max=6]"
         )
 
     async def run(self, message, args, flags):
@@ -147,7 +160,7 @@ class CRoll(BotCommand):
             assert minv >= 0
             assert minv <= maxv
         except (ValueError, AssertionError):
-            raise CommandError(F"É preciso informar números inteiros válidos.")
+            raise CommandError("É preciso informar números inteiros válidos.")
 
         return f"{randint(minv, maxv)}"
 
@@ -168,11 +181,11 @@ class CExpressionParser(BotCommand):
         try:
             return str(ExpressionParser(' '.join(args)).parse().evaluate())
         except ParserError as e:
-            raise CommandError(f'Ocorreu um erro durante a execução do parser:\n{e}')
+            raise CommandError(f'Ocorreu um erro durante a execução do parser:\n\n`{e}`')
         except OverflowError:
-            raise CommandError(f'O número recebido ultrapassa o tamanho permitido pela plataforma.')
+            raise CommandError('O número recebido ultrapassa o tamanho permitido pela plataforma.')
         except ZeroDivisionError:
-            raise CommandError(f'Divisão por zero não permitida.')
+            raise CommandError('Divisão por zero não permitida.')
 
 class CGetMember(BotCommand):
     def __init__(self, bot):
@@ -181,7 +194,7 @@ class CGetMember(BotCommand):
             name = "getmember",
             aliases = ['member'],
             description = "Retorna uma ou mais propriedades desejadas do membro mencionado.",
-            usage = "[@Usuario] [--self] [--name|--id|--nick|--display_name|--mention]"
+            usage = "[@Usuario] [--self] [--name] [--id] [--nick] [--display_name] [--mention]"
         )
 
         self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status', 'mention')
