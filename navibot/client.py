@@ -544,6 +544,34 @@ class Bot:
     async def set_playing_game(self, playingstr: str, status=discord.Status, afk: bool=False):
         await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
 
+    async def get_bot_prefix(self, ctx: Context):
+        assert ctx.guild
+
+        gsm = self.guildsettings
+        var = None
+
+        try:
+            var = await gsm.get_guild_variable(ctx.guild.id, 'bot_prefix')
+        except DatabaseError:
+            pass
+
+        if var and var.get_value():
+            return var.get_value()
+            
+        return self.config.get('global.prefix', ';;')
+
+    async def reset_bot_prefix(self, ctx: Context):
+        assert ctx.guild
+
+        gsm = self.guildsettings
+
+        var = await gsm.get_guild_variable(ctx.guild.id, 'bot_prefix')
+        
+        if var:
+            return await gsm.remove_guild_variable(var)
+        else:
+            raise Exception(f'Variável `bot_prefix` não encontrado no contexto da Guild atual.')
+
     async def receive_ready(self, kwargs):
         logging.info(f"Successfully logged in")
 
@@ -572,16 +600,35 @@ class Bot:
             message
         )
 
-        prefix = self.config.get('global.prefix', ';;')
+        prefix = await self.get_bot_prefix(ctx)
 
         if not ctx.message.content.startswith(prefix):
-            return
-        
-        await self.handle_command_parse(ctx, ctx.message.content[len(prefix):])
+            if self.client.user in ctx.message.mentions:
+                if 'resetprefix' in ctx.message.content:
+                    try:
+                        if await self.reset_bot_prefix(ctx):
+                            await ctx.reply(ReactionType.SUCCESS)
+                        else:
+                            await ctx.reply(ReactionType.FAILURE)
+                    except Exception as e:
+                        logging.exception(f'RECEIVE_MESSAGE: {type(e).__name__}: {e}')
+                        await ctx.reply(ReactionType.FAILURE)
+                else:
+                    await ctx.reply(f'Por acaso esqueceu o prefixo do bot para esta Guild?\n\nO prefixo atual está configurado para `{prefix}`\n\nPara voltar o prefixo ao padrão, mencione o bot novamente com a palavra `resetprefix`.')
 
-    async def handle_command_parse(self, ctx: Context, content: str):
+            return
+        else:
+            resolve_subcommands = True
+            if ctx.message.content.startswith(prefix + '!'):
+                prefix += '!'
+                resolve_subcommands = False
+        
+        await self.handle_command_parse(ctx, ctx.message.content[len(prefix):], resolve_subcommands)
+
+    async def handle_command_parse(self, ctx: Context, content: str, resolve_subcommands: bool=True):
         parser = CommandParser(
-            content
+            content,
+            resolve_subcommands
         )
  
         try:

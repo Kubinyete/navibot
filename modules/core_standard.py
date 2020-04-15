@@ -107,7 +107,7 @@ class CAvatar(BotCommand):
         except AssertionError:
             raise CommandError("O argumento `--size` deve estar entre 16 e 4096 e ser uma potência de 2 (Ex: 32, 64, 128...).")
 
-        icon_url = str(target.avatar_url_as(size=size) if isinstance(target, discord.User) else target.icon_url_as(size=size))
+        icon_url = str(target.avatar_url_as(size=size) if is_instance(target, discord.User) else target.icon_url_as(size=size))
 
         if "url" in flags:
             return icon_url
@@ -115,7 +115,7 @@ class CAvatar(BotCommand):
         out = self.create_response_embed(message) 
         out.set_image(url=icon_url)
             
-        if isinstance(target, discord.Member):
+        if is_instance(target, discord.User):
             out.title = f"Avatar de {target.name}"
         
         return out
@@ -265,7 +265,7 @@ class CEmbed(BotCommand):
             name = "embed",
             aliases = ['emb'],
             description = "Retorna um Embed de acordo com os parâmetros informados.",
-            usage = '[-t "titulo"] [-d "descricao"] [-img "url"] [-timg "url"]'
+            usage = '[-t "titulo"] [-d "descricao"] [-img "url"] [-timg "url"] [-url "url"]'
         )
 
     async def run(self, message, args, flags):
@@ -287,6 +287,8 @@ class CEmbed(BotCommand):
                     embed.set_image(url=curritem)
                 elif key == 'timg':
                     embed.set_thumbnail(url=curritem)
+                elif key == 'url':
+                    embed.url = curritem
 
                 index += 1
             else:

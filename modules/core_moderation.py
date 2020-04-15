@@ -131,6 +131,37 @@ class CSimulateMemberJoin(BotCommand):
             member=message.author
         )
         
+class CSetPrefix(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = 'setprefix',
+            description = "Altera o prefixo de ativação do bot no contexto da Guild atual.",
+            usage = "prefixo [-r|--reset]",
+            permissionlevel=PermissionLevel.GUILD_MOD
+        )
+
+    async def run(self, message, args, flags):
+        if not args or len(args[0]) < 1:
+            return self.get_usage_embed(message)
+
+        gsm = self.get_guild_settings_manager()
+        var = await gsm.get_guild_variable(message.guild.id, 'bot_prefix')
+
+        if var:
+            var.set_value(args[0])
+
+            try:
+                if await gsm.update_guild_variable(var):
+                    return ReactionType.SUCCESS
+                else:
+                    return ReactionType.FAILURE
+            except Exception as e:
+                logging.exception(f'CSETPREFIX: {type(e).__name__}: {e}')
+                return ReactionType.FAILURE
+        else:
+            raise CommandError('Variável `bot_prefix` não encontrado no contexto da Guild atual.')
+
 
 class HWelcomeMessage(ModuleHook):
     async def callable_receive_member_join(self, kwargs):

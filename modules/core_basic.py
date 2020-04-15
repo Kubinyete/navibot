@@ -252,3 +252,14 @@ class CGetArg(BotCommand):
             else:
                 raise CommandError('É preciso informar um indice válido.')
 
+class CArgCount(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "argcount",
+            aliases = ['argc'],
+            description = "Retorna o tamanho da lista de argumentos recebidos.",
+        )
+
+    async def run(self, message, args, flags):
+        return str(len(args))

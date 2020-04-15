@@ -2,20 +2,23 @@
 
 - [x] make-config.sh (2020-04-14 11:24:48)
 
+- [X] Adicionar operador que desativa, naquela "PIPELINE" a resolução de subcomandos dentro de argumentos literais.
+    Caso de uso: ;;! addcommand teste "embed -t \"{fw Nao preciso dar escape nos operadores '{' e '}'!}\""
+
 - [ ] Implementar comandos adicionais:
-    1. hug
-    2. pat
-    3. about
-    4. prefix (por Guild)
-        1. Fallback, mencionar o bot para saber o prefixo atual
-        2. Tentar filtrar os prefixos que são passados para o comando prefix
+    - [ ] hug
+    - [ ] pat
+    - [ ] about
+    - [ ] github
+    - [X] prefix (por Guild)
+        - [X] Fallback, mencionar o bot para saber o prefixo atual
 
 - [ ] Suporte a mais de uma linguagem
+    Não sei se realmente vale a pena a complexidade adicional de adicionar suporte a outras linguagens
+    Vai depender de quais proporções queremos que esse bot tome no futuro
+
     1. pt-br
     2. en
-
-- [ ] Adicionar operador que desativa, naquela "PIPELINE" a resolução de subcomandos dentro de argumentos literais.
-    Caso de uso: ;;! addcommand teste "embed -t \"{fw Nao preciso dar escape nos operadores '{' e '}'!}\""
 
 - [ ] Manual de utilização da "linguagem" de redirecionamento de saída dos comandos e subcomandos em argumentos literais.
     Usar um comando para demonstrar a utilizade.

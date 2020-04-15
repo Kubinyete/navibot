@@ -3,7 +3,7 @@
         "token": "TOKEN_OR_API_KEY",
         "prefix": ";;",
         "playing": ["navibot.py", ";;h"],
-        "playing_delay": 60,
+        "playing_delay": 120,
         "owner_ids": [136219803139571712],
         "public_repo": "https://raw.githubusercontent.com/Kubinyete/navibot/dev/repo"
     },
@@ -11,6 +11,7 @@
         "connection_string": "mysql://navibot:navibot@192.168.1.102/navibotdb"
     },
     "guild_settings": {
+        "bot_prefix": ";;",
         "nsfw_disabled": true,
         "gst_welcome_channel_id": 0,
         "gst_welcome_channel_message": "embed -t \"\\{getmember --self --display_name\\} \\{choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"\\}\" -d \"\\{ec Olá \"\\{getmember --self --mention\\}\", seja bem-vindo ao servidor!\\}\" -timg \"\\{av \"\\{getmember --self --mention\\}\" --size=256 --url\\}\""

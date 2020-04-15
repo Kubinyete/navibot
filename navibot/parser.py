@@ -143,6 +143,11 @@ class Parser:
         raise NotImplementedError()
 
 class CommandParser(Parser):
+    def __init__(self, inputstr: str, resolve_subcommands: bool=True):
+        super().__init__(inputstr)
+
+        self.resolve_subcommands = resolve_subcommands
+
     def parse(self):
         try:
             pipeline = [CommandRequest()] 
@@ -208,7 +213,7 @@ class CommandParser(Parser):
                     raise ParserError(f"Caractere de escape `{PARSER_STRING_ESCAPE}{nextc}` inválido ou não mapeado.")
                 finally:
                     self.seek(1)
-            elif char == PARSER_STRING_SUBCOMMAND_START:
+            elif char == PARSER_STRING_SUBCOMMAND_START and self.resolve_subcommands:
                 # Eu não devo estar processando isso, passar para a função responsável
                 command = self.eat_subcommand()
                 chunks.append(buffer.getvalue())
