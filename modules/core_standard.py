@@ -16,7 +16,7 @@ class CHelp(BotCommand):
             name = "help",
             aliases = ['h'],
             description = "Demonstra informações sobre todos os comandos disponibilizados.",
-            usage = "[cmd]"
+            usage = "[cmd] [-s|--show-hidden]"
         )
 
         self.commands_per_page = 30
@@ -39,9 +39,11 @@ class CHelp(BotCommand):
         embeds = [self.create_response_embed(message)]
         curr = embeds[0]
         
+        show_hidden = 's' in flags or 'show-hidden' in flags
+
         i = 1
         for key, value in self.bot.commands.items():
-            if is_instance(value, CommandAlias):
+            if is_instance(value, CommandAlias) or (value.hidden and not show_hidden):
                 continue
             elif i % self.commands_per_page == 0:
                 curr.title = "Navibot"

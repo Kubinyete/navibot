@@ -194,7 +194,8 @@ class CGetMember(BotCommand):
             name = "getmember",
             aliases = ['member'],
             description = "Retorna uma ou mais propriedades desejadas do membro mencionado.",
-            usage = "[@Usuario] [--self] [--name] [--id] [--nick] [--display_name] [--mention]"
+            usage = "[@Usuario] [--self] [--name] [--id] [--nick] [--display_name] [--mention]",
+            hidden = True
         )
 
         self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status', 'mention')
@@ -228,7 +229,8 @@ class CGetArg(BotCommand):
             name = "getarg",
             aliases = ['arg'],
             description = "Retorna uma ou mais argumentos recebidos de um comando interpretado que seja o ativador.",
-            usage = "indice [--all]"
+            usage = "indice [--all]",
+            hidden = True
         )
 
     async def run(self, message, args, flags):
@@ -259,6 +261,7 @@ class CArgCount(BotCommand):
             name = "argcount",
             aliases = ['argc'],
             description = "Retorna o tamanho da lista de argumentos recebidos.",
+            hidden = True
         )
 
     async def run(self, message, args, flags):

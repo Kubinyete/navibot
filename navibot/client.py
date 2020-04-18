@@ -97,13 +97,13 @@ class BotCommand(Command):
     # @TODO:
     # Parar de usar enable_usermap, pensar em uma outra forma de possuir uma "memória volátil"
     # para os comandos usarem dependendo do contexto
-    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, visible: bool=True, enable_usermap: bool=False, **kwargs):
+    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False, enable_usermap: bool=False, **kwargs):
         super().__init__(bot)
 
         self.update_info(kwargs)
 
         self.permissionlevel = permissionlevel
-        self.visible = visible
+        self.hidden = hidden
 
         self.enable_usermap = enable_usermap
         
@@ -139,8 +139,8 @@ class BotCommand(Command):
         raise NotImplementedError()
 
 class InterpretedCommand(BotCommand):
-    def __init__(self, bot, name: str, command: str, permissionlevel: PermissionLevel=PermissionLevel.NONE, visible: bool=True):
-        super().__init__(bot, permissionlevel=permissionlevel, enable_usermap=False, name=name)
+    def __init__(self, bot, name: str, command: str, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False):
+        super().__init__(bot, permissionlevel=permissionlevel, enable_usermap=False, hidden=hidden, name=name)
 
         self.command = command
 
@@ -301,7 +301,9 @@ class Client(discord.Client):
             return
 
         for coroutine in self.listeners[eventname].values():
-            await coroutine(kwargs)
+            asyncio.create_task(
+                coroutine(kwargs)
+            )
 
 class Config:
     def __init__(self, configfile: str):
@@ -415,9 +417,6 @@ class Bot:
             if is_instance(cmd, BotCommand):
                 assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
                 
-                if not cmd.visible:
-                    continue
-
                 self.commands[cmd.name.lower()] = cmd
 
                 for alias in cmd.aliases:
