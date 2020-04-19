@@ -226,4 +226,4 @@ class CHotReload(BotCommand):
             return ReactionType.SUCCESS
         except Exception as e:
             logging.exception(f'CHOTRELOAD: {type(e).__name__}: {e}')
-            raise CommandError(f'Ocorreu um erro ao tentar efetuar o reload:\n\n`{e}`')
+            raise CommandError(f'Ocorreu um erro ao tentar efetuar o reload:\n\n`{type(e).__name__}: {e}`')

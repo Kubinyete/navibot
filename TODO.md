@@ -12,8 +12,8 @@
     - [ ] pat @Usuario
     - [ ] about
         * Deve explicar o usuário como funciona o processo de parse do comando, dar exemplos de chamada de comandos usando os operadores | e {}.    
-    - [ ] github
-    - [ ] hotreload
+    - [X] github (2020-04-19 00:10:11)
+    - [X] hotreload (2020-04-19 00:10:08)
     - [X] setprefix prefixo [-r|--reset] (2020-04-15 21:01:03)
         - [X] Fallback, mencionar o bot para saber o prefixo atual (2020-04-15 21:01:32)
         - [X] Fallback, mencionar o bot para resetar o prefixo (2020-04-15 21:01:34)

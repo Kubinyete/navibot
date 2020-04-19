@@ -362,6 +362,9 @@ class ExpressionTree:
                     self.at.right = No(val)
             else:
                 # Estamos adicionando nosso segundo valor, sem operador, adicionar um operador de soma
+                # @FIX: Somente para valores negativos!!!
+                assert val < 0
+
                 self.insert_operator(EXPR_ADD)
                 self.insert_value(val)
 
@@ -394,11 +397,19 @@ class ExpressionTree:
                 self.at = self.head
         else:
             # Não temos nenhum operador ainda, estamos adicionando o primeiro
-            assert self.head and self.head.is_value()
+            # assert self.head and self.head.is_value()
 
-            new.left = self.head
-            self.head = new
-            self.at = self.head
+            if self.head:
+                assert  self.head.is_value()
+
+                new.left = self.head
+                self.head = new
+                self.at = self.head
+            else:
+                # Não temos nada, nenhum valor, nenhum operador.
+                # Adicione um zero.
+                self.insert_value(0)
+                self.insert_operator(op)
 
     def insert_tree(self, t):
         # Se a árvore que estamos recebendo tem dados e operadores
@@ -444,49 +455,50 @@ class ExpressionParser(Parser):
         is_negative = False
 
         c = self.current_char()
-        while c and c != EXPR_PAR_END:
-            if c in EXPR_OPERATORS:
-                if not is_negative:
-                    if c == EXPR_SUB:
-                        is_negative = True
-                    else:
-                        try:
+
+        try:
+            while c and c != EXPR_PAR_END:
+                if c in EXPR_OPERATORS:
+                    if not is_negative:
+                        if c == EXPR_SUB:
+                            is_negative = True
+                        else:
                             t.insert_operator(c)
-                        except AssertionError:
-                            raise ParserError(f'Erro de sintaxe, por favor verifique os dados informados.')
-                else:
-                    raise ParserError(f'Recebido operador {c}, porém esperado um valor.')
-            elif char_in_range(c, '0', '9') or c in (EXPR_VIRG, EXPR_POINT):
-                n = self.eat_number()
-                t.insert_value(n if not is_negative else -1 * n)
-                is_negative = False
-                self.seek(-1)
-            elif c == EXPR_PAR_START:
-                # Utiliza outro parser, recursivamente para trabalhar dentro dos parenteses
-                # implementação facilitada, porém consumo maior de memória
-                p = ExpressionParser(self.eat_expression_parenthesis())
-
-                if is_negative:
-                    # É para usar um operador de SUB e não assumir que o valor é negativo.
-                    t.insert_operator(EXPR_SUB)
+                    else:
+                        raise ParserError(f'Recebido operador {c}, porém esperado um valor.')
+                elif char_in_range(c, '0', '9') or c in (EXPR_VIRG, EXPR_POINT):
+                    n = self.eat_number()
+                    t.insert_value(n if not is_negative else -1 * n)
                     is_negative = False
+                    self.seek(-1)
+                elif c == EXPR_PAR_START:
+                    # Utiliza outro parser, recursivamente para trabalhar dentro dos parenteses
+                    # implementação facilitada, porém consumo maior de memória
+                    p = ExpressionParser(self.eat_expression_parenthesis())
 
-                t.insert_tree(p.parse())
-                self.seek(-1)
-            elif char_in_range(c, 'A', 'Z'):
-                identifier = self.eat_identifier()
-                value = self.constants.get(identifier, None)
+                    if is_negative:
+                        # É para usar um operador de SUB e não assumir que o valor é negativo.
+                        t.insert_operator(EXPR_SUB)
+                        is_negative = False
 
-                if not value:
-                    raise ParserError(f'Constante {identifier} não definida.')
-                else:
-                    t.insert_value(value if not is_negative else -1 * value)
-                    is_negative = False
-                
-                self.seek(-1)
+                    t.insert_tree(p.parse())
+                    self.seek(-1)
+                elif char_in_range(c, 'A', 'Z'):
+                    identifier = self.eat_identifier()
+                    value = self.constants.get(identifier, None)
 
-            self.seek(1)
-            c = self.current_char()
+                    if not value:
+                        raise ParserError(f'Constante {identifier} não definida.')
+                    else:
+                        t.insert_value(value if not is_negative else -1 * value)
+                        is_negative = False
+
+                    self.seek(-1)          
+
+                self.seek(1)
+                c = self.current_char()
+        except AssertionError:
+            raise ParserError(f'Erro de sintaxe, por favor verifique os dados informados.')      
 
         return t
 

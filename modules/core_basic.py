@@ -267,13 +267,53 @@ class CArgCount(BotCommand):
     async def run(self, message, args, flags):
         return str(len(args))
 
-class CTeste(BotCommand):
+class CArgLen(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = "teste",
+            name = "arglen",
+            aliases = ['argl'],
+            description = "Retorna a soma do tamanho de todos os argumentos recebidos.",
             hidden = True
         )
 
     async def run(self, message, args, flags):
-        return "Olá mundo!"
+        if not args:
+            return self.get_usage_embed(message)
+
+        ilen = 0
+        for a in args:
+            ilen += len(a)
+
+        return str(ilen)
+
+class CSubstr(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "substr",
+            aliases = ['sub'],
+            description = "Retorna uma substring dos argumentos recebidos como uma única string.",
+            usage = 'texto [--start=0] [--end=-1]',
+            hidden = True
+        )
+
+    async def run(self, message, args, flags):
+        if not args:
+            return self.get_usage_embed(message)
+
+        en = None
+
+        try:
+            st = int(flags.get('start', '0'))
+
+            if 'end' in flags:
+                en = int(flags['end'])
+        except ValueError:
+            raise CommandError('As flags `--start` e `--end` não possuem um formato de número válido.')
+
+        try:
+            joined_args = ' '.join(args)
+            return joined_args[st:en] if en != None else joined_args[st:]
+        except IndexError:
+            raise CommandError('O alcance de índices informados não são válidos (start={st}, end={en}).')
