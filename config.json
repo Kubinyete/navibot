@@ -50,6 +50,9 @@
         {"name": "shrug", "value": "echo \"{getarg --all} ¯\\\\_(ツ)_/¯\""},
         {"name": "tableflip", "value": "echo \"{getarg --all} (╯°□°）╯︵ ┻━┻\""},
         {"name": "unflip", "value": "echo \"{getarg --all} ┬─┬ ノ( ゜-゜ノ)\""},
-        {"name": "lenny", "value": "echo \"{getarg --all} ( ͡° ͜ʖ ͡°)\""}
+        {"name": "lenny", "value": "echo \"{getarg --all} ( ͡° ͜ʖ ͡°)\""},
+
+        {"name": "github", "value": "embed -t Navibot -url https://github.com/Kubinyete/navibot -timg https://avatars0.githubusercontent.com/u/23388918 -d \"Clique [aqui](https://github.com/Kubinyete/navibot) para acessar o reposítorio do Github!\""},
+        {"name": "repo", "value": "github"}
     ]
 }
