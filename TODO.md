@@ -13,6 +13,7 @@
     - [ ] about
         * Deve explicar o usuário como funciona o processo de parse do comando, dar exemplos de chamada de comandos usando os operadores | e {}.    
     - [ ] github
+    - [ ] hotreload
     - [X] setprefix prefixo [-r|--reset] (2020-04-15 21:01:03)
         - [X] Fallback, mencionar o bot para saber o prefixo atual (2020-04-15 21:01:32)
         - [X] Fallback, mencionar o bot para resetar o prefixo (2020-04-15 21:01:34)
@@ -21,6 +22,7 @@
     - [ ] GuildCommandsManager, dicionário local (per-guild) com cache habilitado, que terá os comandos interpretados
     - [ ] addguildcommand name "cmd"
     - [ ] removeguildcommand name
+
 # Navibot (LTG)
 
 - [ ] Suporte a mais de uma linguagem

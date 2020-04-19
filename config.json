@@ -1,8 +1,8 @@
 {
     "global": {
         "token": "TOKEN_OR_API_KEY",
-        "prefix": ";;",
-        "playing": ["navibot.py", ";;h"],
+        "prefix": ";",
+        "playing": ["navibot.py", ";h"],
         "playing_delay": 120,
         "owner_ids": [136219803139571712],
         "public_repo": "https://raw.githubusercontent.com/Kubinyete/navibot/dev/repo"
@@ -11,10 +11,10 @@
         "connection_string": "mysql://navibot:navibot@192.168.1.102/navibotdb"
     },
     "guild_settings": {
-        "bot_prefix": ";;",
+        "bot_prefix": ";",
         "nsfw_disabled": true,
         "gst_welcome_channel_id": 0,
-        "gst_welcome_channel_message": "embed -t \"\\{getmember --self --display_name\\} \\{choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"\\}\" -d \"\\{ec Olá \"\\{getmember --self --mention\\}\", seja bem-vindo ao servidor!\\}\" -timg \"\\{av \"\\{getmember --self --mention\\}\" --size=256 --url\\}\""
+        "gst_welcome_channel_message": "embed -t \"{getmember --self --display_name} {choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"}\" -d \"Olá {getmember --self --mention}, seja bem-vindo ao servidor!\" -timg \"{av \"{getmember --self --mention}\" --size=256 --url}\""
     },
     "modules": {
         "osu": {
@@ -32,9 +32,9 @@
         {"name": "5head", "value": "embed -img https://cdn.frankerfacez.com/emoticon/239504/4 -t 5Head -d \"{getarg --all}\""},
         {"name": "yep", "value": "embed -img https://cdn.frankerfacez.com/emoticon/418189/4 -t YEP -d \"{getarg --all}\""},
         {"name": "kannafu", "value": "embed -img https://cdn.frankerfacez.com/emoticon/173046/4 -t kannaFU -d \"{getarg --all}\""},
-        {"name": "thinknico", "value": "embed -img https://cdn.frankerfacez.com/emoticon/334956/4 -d \"{getarg --all}\""},
+        {"name": "thinknico", "value": "embed -img https://cdn.frankerfacez.com/emoticon/334956/4 -t thinkNico -d \"{getarg --all}\""},
 
-        {"name": "monkas", "value": "embed -img https://cdn.discordapp.com/emojis/588215460084973578.gif?v=1 -d \"{getarg --all}\""},
+        {"name": "monkas", "value": "embed -img https://cdn.discordapp.com/emojis/588215460084973578.gif?v=1 -t monkaS -d \"{getarg --all}\""},
         {"name": "roach", "value": "embed -img https://cdn.discordapp.com/emojis/652158690107064355.gif?v=1 -t ROACH -d \"{getarg --all}\""},
 
         {"name": "gachibass", "value": "embed -img https://i.imgur.com/5hOjdYT.gif -t gachiBASS -d \"{getarg --all}\""},

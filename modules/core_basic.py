@@ -266,3 +266,14 @@ class CArgCount(BotCommand):
 
     async def run(self, message, args, flags):
         return str(len(args))
+
+class CTeste(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "teste",
+            hidden = True
+        )
+
+    async def run(self, message, args, flags):
+        return "Olá mundo!"

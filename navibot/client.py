@@ -10,6 +10,7 @@ import time
 import traceback
 import databases
 import re
+import sys
 
 from enum import Enum, auto
 
@@ -340,9 +341,6 @@ class Bot:
 
         # Caminho base do bot, é utilizado como referência para procurar modulos
         self.curr_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if not path else path
-        
-        # Intervalo que fica rodando de fundo para a troca de atividades.
-        self.playing_interval = None
 
         # Nosso objeto para carregar valores do arquivo de configurações
         self.config = Config(
@@ -350,7 +348,6 @@ class Bot:
         )
 
         self.config.load()
-        
         self.client = Client()
 
         # Prepara o handler para receber comandos em mensagens
@@ -370,20 +367,33 @@ class Bot:
         # Lista de hooks acoplados
         self.hooks = []
 
-        # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
-        self.load_modules(f'{self.curr_path}/modules')
-        
-        # Carrega os comandos interpretados definidos na chave específicada.
-        self.load_interpreted_commands('interpreted_commands')
-        
-        # Objeto de conexão de banco de dados ativo no momento.
-        self.active_database = None
+        # Inicialização de tudo
+        self.load_all_modules()
 
         # Nosso gerênciador de variáveis por Guild.
         self.guildsettings = GuildSettingsManager(
             self, 
             self.config.get('guild_settings', {})
         )
+
+        # Objeto de conexão de banco de dados ativo no momento.
+        self.active_database = None
+
+        # Intervalo que fica rodando de fundo para a troca de atividades.
+        self.playing_interval = None
+
+    def load_all_modules(self):
+        self.commands.clear()
+
+        for hook in self.hooks:
+            hook.clear_binded_events()
+
+        self.hooks.clear()
+
+        # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
+        self.load_modules(f'{self.curr_path}/modules', force_reload=True)
+        # Carrega os comandos interpretados definidos na chave específicada.
+        self.load_interpreted_commands('interpreted_commands')
 
     async def get_database_connection(self):
         if not self.active_database:
@@ -401,16 +411,30 @@ class Bot:
         
         return self.active_database
 
-    def load_modules(self, dirpath: str):
+    def load_modules(self, dirpath: str, force_reload: bool=False):
         with os.scandir(dirpath) as iterator:
             for file in iterator:
                 if file.name.endswith('.py') and file.is_file():
-                    mod = importlib.import_module(f"{dirpath[len(os.path.dirname(dirpath)) + 1:].replace('/', '.')}.{file.name[:-3]}")
-                    self.load_objects_from_module(mod)
+                    module_str = f"{dirpath[len(os.path.dirname(dirpath)) + 1:].replace('/', '.')}.{file.name[:-3]}"
+                    # Isso pode falhar, caso falhe, apenas avise o log e ignore o modulo.
+                    try:
+                        if module_str in sys.modules:
+                            mod = importlib.reload(sys.modules[module_str])
+                        else:
+                            # Caso o modulo já esteja importando, essa call é ignorada, porém ainda recebemos o objeto module de retorno.
+                            # Isso não é para falhar, caso falhe, será durante a inicialização e portanto encontramos um erro no código do modulo.
+                            mod = importlib.import_module(module_str)
+                        
+                    except Exception as e:
+                        logging.exception(f'LOAD_MODULES, failed to load module {module_str}, skipping broken module: {type(e).__name__}: {e}')
+                        continue
+                    finally:
+                        self.load_objects_from_module(mod)
 
     def load_objects_from_module(self, mod):
         logging.info(f"Attempting to load commands from module: {mod}")
         
+        # Não gosto muito dessa lambda, mas pore enquanto vamos filtrar assim...
         for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and (is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand or is_subclass(x, ModuleHook) and x != ModuleHook)):
             cmd = obj[1](self)
 
@@ -467,6 +491,15 @@ class Bot:
                     command['value']
                 )
             )
+
+    async def reload_all_modules(self):
+        logging.info(f"Reloading configuration file and all modules...")
+
+        # @TODO: Verificar se isso aqui é seguro mostrar para o usuário.
+        # Se isso falhar, voltará o Exception para o HotReload
+        self.config.load()
+
+        self.load_all_modules()
 
     def listen(self):
         self.client.listen(self.config.get('global.token'))

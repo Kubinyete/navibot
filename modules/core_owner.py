@@ -97,7 +97,7 @@ class CGuildVariables(BotCommand):
             name = 'guildvariable',
             aliases = ['var', 'gvar'],
             description = "Gerencia as variáveis da Guild atual.",
-            usage = "variavel [novo valor] [--list]",
+            usage = "variavel [novo valor] [--list] [--reset]",
             permissionlevel=PermissionLevel.BOT_OWNER
         )
 
@@ -120,33 +120,43 @@ class CGuildVariables(BotCommand):
             except KeyError:
                 raise CommandError(f'A variável `{args[0]}` não existe no contexto da Guild atual.')
 
-            if len(args) > 1:
-                new_value = ' '.join(args[1:])
-                prev_value = expected_variable.get_value()
-
+            if 'reset' in flags:
                 try:
-                    expected_variable.set_value(new_value)
-                except ValueError:
-                    raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
-
-                try:
-                    if await gsm.update_guild_variable(expected_variable):
+                    if await gsm.remove_guild_variable(expected_variable):
                         return ReactionType.SUCCESS
                     else:
-                        expected_variable.set_value(prev_value)
-                    
                         return ReactionType.FAILURE
                 except Exception as e:
                     logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
-                    
-                    expected_variable.set_value(prev_value)
-                    
                     return ReactionType.FAILURE
             else:
-                # Sem formatação, pois podemos utilizar o valor da variável em outros comandos
-                # return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
-                
-                return expected_variable.get_value()
+                if len(args) > 1:
+                    new_value = ' '.join(args[1:])
+                    prev_value = expected_variable.get_value()
+
+                    try:
+                        expected_variable.set_value(new_value)
+                    except ValueError:
+                        raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
+
+                    try:
+                        if await gsm.update_guild_variable(expected_variable):
+                            return ReactionType.SUCCESS
+                        else:
+                            expected_variable.set_value(prev_value)
+                        
+                            return ReactionType.FAILURE
+                    except Exception as e:
+                        logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
+                        
+                        expected_variable.set_value(prev_value)
+                        
+                        return ReactionType.FAILURE
+                else:
+                    # Sem formatação, pois podemos utilizar o valor da variável em outros comandos
+                    # return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
+                    
+                    return expected_variable.get_value()
 
 class CAddCommand(BotCommand):
     def __init__(self, bot):
@@ -200,3 +210,20 @@ class CRemoveCommand(BotCommand):
         except Exception as e:
             logging.exception(f'CREMOVECOMMAND: {type(e).__name__}: {e}')
             raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n\n`{e}`')
+
+class CHotReload(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "hotreload",
+            description = "Efetua a reinicialização de todos os comandos e o processo de inicialização, consequentemente, carregando novamente os comandos.",
+            permissionlevel = PermissionLevel.BOT_OWNER
+        )
+
+    async def run(self, message, args, flags):
+        try:
+            await self.bot.reload_all_modules()
+            return ReactionType.SUCCESS
+        except Exception as e:
+            logging.exception(f'CHOTRELOAD: {type(e).__name__}: {e}')
+            raise CommandError(f'Ocorreu um erro ao tentar efetuar o reload:\n\n`{e}`')
