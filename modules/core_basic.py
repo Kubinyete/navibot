@@ -194,13 +194,15 @@ class CGetMember(BotCommand):
             name = "getmember",
             aliases = ['member'],
             description = "Retorna uma ou mais propriedades desejadas do membro mencionado.",
-            usage = "[@Usuario] [--self] [--name] [--id] [--nick] [--display_name] [--mention]",
+            usage = "[@Usuario] [--self] [--name] [--id] [--nick] [--display_name] [--mention] [--permissionlevel]",
             hidden = True
         )
 
         self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status', 'mention')
 
     async def run(self, message, args, flags):
+        assert message.guild
+
         users = flags.get('mentions', None)
         
         if 'self' in flags:
@@ -211,10 +213,15 @@ class CGetMember(BotCommand):
         if not target:
             return self.get_usage_embed(message)
 
+        # @HACK: Atribuir target como se fosse o novo author da mensagem
+        message.author = target
+
         ret = []
 
         for key in flags.keys():
-            if key in self.allowed_attr:
+            if key == 'permissionlevel':
+                ret.append(self.bot.rate_author_permission_level(message).name)
+            elif key in self.allowed_attr:
                 tmp = getattr(target, key, None)
 
                 if tmp:

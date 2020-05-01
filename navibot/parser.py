@@ -310,6 +310,9 @@ class No:
     def get_priority(self):
         return self.priority
 
+    def is_complete(self):
+        return self.is_value() or self.left and self.right
+
     def evaluate(self):
         if self.is_value():
             return self.value
@@ -444,6 +447,9 @@ class ExpressionTree:
 
     def show(self):
         self.output(self.head)
+
+    def last_operator_has_value(self):
+        return not self.at or self.at.is_complete()
             
 class ExpressionParser(Parser):
     def __init__(self, inputstr, constants=EXPR_CONSTANTS):
@@ -499,6 +505,9 @@ class ExpressionParser(Parser):
                 c = self.current_char()
         except AssertionError:
             raise ParserError(f'Erro de sintaxe, por favor verifique os dados informados.')      
+
+        if not t.last_operator_has_value():
+            raise ParserError(f'Erro de sintaxe, o último operador não possui dois operandos.')
 
         return t
 

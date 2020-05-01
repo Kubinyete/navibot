@@ -514,28 +514,28 @@ class Bot:
             icon_url=ctx.author.avatar_url_as(size=32)
         )
 
-    def has_permission_level(self, command: BotCommand, ctx: Context):
+    def has_permission_level(self, permissionlevel: PermissionLevel, ctx: Context):
+        return self.rate_author_permission_level(ctx).value >= permissionlevel.value
+
+    def rate_author_permission_level(self, ctx: Context):
         assert ctx.author
         assert ctx.guild
 
-        if command.permissionlevel is PermissionLevel.NONE:
-            return True
-        elif command.permissionlevel is PermissionLevel.BOT_OWNER:
-            return ctx.author.id in self.config.get('global.owner_ids', [])
+        permlevel = PermissionLevel.NONE
+
+        if ctx.author.id in self.config.get('global.owner_ids', []):
+            permlevel =  PermissionLevel.BOT_OWNER
         else:
-            currlevel = None
             permissions = ctx.channel.permissions_for(ctx.author)
 
             if permissions.kick_members or permissions.ban_members:
-                currlevel = PermissionLevel.GUILD_MOD
-            
+                permlevel = PermissionLevel.GUILD_MOD
             if permissions.administrator:
-                currlevel = PermissionLevel.GUILD_ADMIN
-
+                permlevel = PermissionLevel.GUILD_ADMIN
             if ctx.guild.owner == ctx.author:
-                currlevel = PermissionLevel.GUILD_OWNER
-            
-            return currlevel.value >= command.permissionlevel.value if currlevel else False
+                permlevel = PermissionLevel.GUILD_OWNER
+
+        return permlevel
 
     def extract_mentions_from(self, args: list, flags: dict, ctx: Context):
         assert ctx.guild
@@ -595,6 +595,9 @@ class Bot:
     async def reset_bot_prefix(self, ctx: Context):
         assert ctx.guild
 
+        if not self.has_permission_level(PermissionLevel.GUILD_MOD, ctx):
+            raise PermissionLevelError(f'Você não possui um nível de permissão igual ou superior à `{PermissionLevel.GUILD_MOD.name}`  para poder realizar esta ação.')
+
         gsm = self.guildsettings
 
         var = await gsm.get_guild_variable(ctx.guild.id, 'bot_prefix')
@@ -642,6 +645,8 @@ class Bot:
                             await ctx.reply(ReactionType.SUCCESS)
                         else:
                             await ctx.reply(ReactionType.FAILURE)
+                    except PermissionLevelError as e:
+                        await ctx.reply(e)
                     except Exception as e:
                         logging.exception(f'RECEIVE_MESSAGE: {type(e).__name__}: {e}')
                         await ctx.reply(ReactionType.FAILURE)
@@ -683,7 +688,7 @@ class Bot:
             if handler:
                 handler = handler.origin if isinstance(handler, CommandAlias) else handler
 
-                if not self.has_permission_level(handler, ctx):
+                if not self.has_permission_level(handler.permissionlevel, ctx):
                     raise PermissionLevelError(f"Você não possui um nível de permissão igual ou superior à `{handler.permissionlevel.name}`")
 
                 args = command.args
@@ -753,7 +758,7 @@ class Bot:
 
             # Se temos argumentos vindos de um outro comando ativador (Ex: InterpretedCommand)
             if activator_args != None:
-                    flags['activator_args'] = activator_args
+                flags['activator_args'] = activator_args
 
             # Se temos argumentos vindos de um outro comando ativador (Ex: InterpretedCommand)
             if activator_flags != None:

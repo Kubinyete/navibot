@@ -155,8 +155,7 @@ class CGuildVariables(BotCommand):
                 else:
                     # Sem formatação, pois podemos utilizar o valor da variável em outros comandos
                     # return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
-                    
-                    return expected_variable.get_value()
+                    return str(expected_variable.get_value())
 
 class CAddCommand(BotCommand):
     def __init__(self, bot):
