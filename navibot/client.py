@@ -11,6 +11,7 @@ import traceback
 import databases
 import re
 import sys
+import io
 
 from enum import Enum, auto
 
@@ -32,7 +33,7 @@ class ReactionType(Enum):
     FAILURE = '❌'
 
 class Context:
-    def __init__(self, bot, channel: discord.TextChannel, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
+    def __init__(self, bot, channel: discord.TextChannel=None, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
         self.bot = bot
         self.channel = channel
         self.author = author
@@ -69,6 +70,30 @@ class Context:
 
         else:
             raise ValueError('Não é possível responser a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+
+class CliContext(Context):
+    def __init__(self, bot, input_data: str, output_stream: io.StringIO, channel: discord.TextChannel=None, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
+        super().__init__(bot, channel, guild, author, message)
+
+        self.input_data = input_data
+        self.output_stream = output_stream
+
+    async def reply(self, response):
+        response_data = None
+
+        if isinstance(response, str) or isinstance(response, list):
+            response_data = ' '.join(response) if isinstance(response, list) else response
+        elif isinstance(response, discord.Embed):
+            response_data = response.description
+        elif isinstance(response, ReactionType):
+            response_data = response.name
+        elif isinstance(response, Exception):
+            response_data = f'{type(response).__name__}: {response}'
+        else:
+            raise ValueError('Não é possível responser a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+
+        if response_data:
+            self.output_stream.write(response_data)
 
 class Command:
     def __init__(self, bot):
@@ -139,6 +164,15 @@ class BotCommand(Command):
     async def run(self, ctx: Context, args: list, flags: dict):
         raise NotImplementedError()
 
+class CliCommand(Command):
+    def __init__(self, bot, **kwargs):
+        super().__init__(bot)
+
+        self.update_info(kwargs)
+
+    async def run(self, ctx: CliContext, args: list, flags: dict):
+        raise NotImplementedError()
+
 class InterpretedCommand(BotCommand):
     def __init__(self, bot, name: str, command: str, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False):
         super().__init__(bot, permissionlevel=permissionlevel, enable_usermap=False, hidden=hidden, name=name)
@@ -157,6 +191,7 @@ class InterpretedCommand(BotCommand):
         # os parâmetros activator_args e activator_flags são preservados pois
         # apontam para os args e flags originais recebidos pelo comando interpretado.
         return await self.bot.handle_pipeline_execution(
+            self.bot.commands,
             ctx, 
             pipeline, 
             activator_args=args, 
@@ -198,6 +233,9 @@ class ModuleHook:
 
     def run(self):
         raise NotImplementedError()
+
+    def destroy(self):
+        self.clear_binded_events()
 
 class TimeoutContext:
     def __init__(self, waitfor: int, callable: callable, callback: callable=None, **kwargs):
@@ -330,6 +368,69 @@ class Config:
 
         return curr
 
+class CommandsManager:
+    def __init__(self, bot):
+        self.bot = bot
+        self.commands = {}
+
+    def register_command(self, cmd):
+        assert is_instance(cmd, Command)
+        assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
+                
+        self.commands[cmd.name.lower()] = cmd
+
+        for alias in cmd.aliases:
+            self.commands[alias.lower()] = CommandAlias(cmd)
+
+    def unregister_command(self, cmd):
+        assert is_instance(cmd, Command)
+
+        del self.commands[cmd.name]
+
+        for alias in cmd.aliases:
+            if self.commands[alias] is cmd:
+                del self.commands[alias]
+
+    def get_command_by_name(self, name: str):
+        try:
+            target = self.commands[name.lower()]
+            return target if not isinstance(target, CommandAlias) else target.origin
+        except KeyError:
+            return None
+
+    def clear(self):
+        self.commands.clear()
+
+    def get_all_commands(self, show_hidden: bool=False):
+        cmds = list()
+        
+        for value in self.commands.values():
+            if not isinstance(value, CommandAlias) and (show_hidden or not value.hidden):
+                cmds.append(value)
+
+        return cmds
+
+class HooksManager:
+    def __init__(self, bot):
+        self.bot = bot
+        self.hooks = []
+
+    def register_hook(self, hook):
+        assert is_instance(hook, ModuleHook)
+        self.hooks.append(hook)
+        hook.run()
+
+    def unregister_hook(self, hook):
+        assert is_instance(hook, ModuleHook)
+        self.hooks.remove(hook)
+        hook.destroy()
+
+    def clear(self):
+        for hook in self.hooks:
+            self.unregister_hook(hook)
+
+        assert not self.hooks
+
 class Bot:
     def __init__(self, path: str=None, logfile: str=None, loglevel=logging.DEBUG):
         logging.basicConfig(
@@ -363,9 +464,18 @@ class Bot:
         )
 
         # Dicionário de comandos
-        self.commands = {}
+        self.commands = CommandsManager(self)
+        self.clicommands = CommandsManager(self)
+
         # Lista de hooks acoplados
-        self.hooks = []
+        self.hooks = HooksManager(self)
+
+        # Servidor de CLI rodando no fundo para aceitar conexões vindas do localhost
+        self.connection_manager = ConnectionManager(
+            self,
+            self.config.get('connections.listen', '127.0.0.1'),
+            self.config.get('connections.port', 7777)
+        )
 
         # Inicialização de tudo
         self.load_all_modules()
@@ -384,10 +494,6 @@ class Bot:
 
     def load_all_modules(self):
         self.commands.clear()
-
-        for hook in self.hooks:
-            hook.clear_binded_events()
-
         self.hooks.clear()
 
         # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
@@ -435,46 +541,44 @@ class Bot:
         logging.info(f"Attempting to load commands from module: {mod}")
         
         # Não gosto muito dessa lambda, mas pore enquanto vamos filtrar assim...
-        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and (is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand or is_subclass(x, ModuleHook) and x != ModuleHook)):
+        for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and (
+                is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand 
+                or 
+                is_subclass(x, ModuleHook) and x != ModuleHook
+                or
+                is_subclass(x, CliCommand) and x != CliCommand
+            )):
             cmd = obj[1](self)
 
             if is_instance(cmd, BotCommand):
-                assert inspect.iscoroutinefunction(getattr(cmd, 'run'))
-                
-                self.commands[cmd.name.lower()] = cmd
-
-                for alias in cmd.aliases:
-                    self.commands[alias.lower()] = CommandAlias(cmd)
-
-                logging.info(f"Successfully loaded a new command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+                self.commands.register_command(cmd)
+                logging.info(f"Successfully loaded a new Bot Command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+            elif is_instance(cmd, CliCommand):
+                self.clicommands.register_command(cmd)
+                logging.info(f"Successfully loaded a new CLI Command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
             else:
-                assert is_instance(cmd, ModuleHook)
-                
-                self.hooks.append(cmd)
-
-                cmd.run()
-
-                logging.info(f"Successfully loaded a new hook: {mod.__name__}.{type(cmd).__name__} ({cmd})")
+                self.hooks.register_hook(cmd)
+                logging.info(f"Successfully loaded a new Bot Hook: {mod.__name__}.{type(cmd).__name__} ({cmd})")
 
     def add_interpreted_command(self, command: InterpretedCommand):
         logging.info(f"Adding interpreted command: {command.name} ({command})")
 
-        if command.name in self.commands:
-            if isinstance(self.commands[command.name], InterpretedCommand):
-                self.commands[command.name] = command
+        target = self.commands.get_command_by_name(command.name)
+        if target:
+            if isinstance(target, InterpretedCommand):
+                self.commands.register_command(command)
             else:
                 raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
         else:
-            self.commands[command.name] = command
+            self.commands.register_command(command)
 
     def remove_interpreted_command(self, name: str):
-        if name in self.commands:
-            command = self.commands[name]
-            
-            if isinstance(command, InterpretedCommand):
-                logging.info(f"Removing interpreted command: {command.name} ({command})")
+        command = self.commands.get_command_by_name(name)
 
-                del self.commands[name]
+        if command:
+            if isinstance(command, InterpretedCommand):
+                self.commands.unregister_command(command)
+                logging.info(f"Removing interpreted command: {command.name} ({command})")
             else:
                 raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
 
@@ -610,6 +714,9 @@ class Bot:
     async def receive_ready(self, kwargs):
         logging.info(f"Successfully logged in")
 
+        if not self.connection_manager.server_is_open():
+            await self.connection_manager.start()
+
         if self.playing_interval is None:
             self.playing_interval = IntervalContext(
                 self.config.get('global.playing_delay', 60),
@@ -662,7 +769,10 @@ class Bot:
         
         await self.handle_command_parse(ctx, ctx.message.content[len(prefix):], resolve_subcommands)
 
-    async def handle_command_parse(self, ctx: Context, content: str, resolve_subcommands: bool=True):
+    async def handle_cli_command_parse(self, ctx: CliContext, content: str):
+        return await self.handle_command_parse(ctx, content, resolve_subcommands=False, alternative_target_commands=self.clicommands)
+
+    async def handle_command_parse(self, ctx: Context, content: str, resolve_subcommands: bool=True, alternative_target_commands: CommandsManager=None):
         parser = CommandParser(
             content,
             resolve_subcommands
@@ -671,7 +781,11 @@ class Bot:
         try:
             pipeline = parser.parse()
 
-            output = await self.handle_pipeline_execution(ctx, pipeline)
+            output = await self.handle_pipeline_execution(
+                self.commands if not alternative_target_commands else alternative_target_commands, 
+                ctx, 
+                pipeline
+            )
 
             if output:
                 await ctx.reply(output)
@@ -679,16 +793,16 @@ class Bot:
             # Exception "amigável", envie isso no contexto atual de volta para o usuário
             await ctx.reply(e)
 
-    async def handle_pipeline_execution(self, ctx: Context, pipeline, activator_args: list=None, activator_flags: dict=None):
+    async def handle_pipeline_execution(self, target_commands: CommandsManager, ctx: Context, pipeline, activator_args: list=None, activator_flags: dict=None):
         pipeline_output = ''
         
         for command in pipeline:
-            handler = self.commands.get(command.cmd.lower(), None)
+            handler = target_commands.get_command_by_name(command.cmd)
 
             if handler:
                 handler = handler.origin if isinstance(handler, CommandAlias) else handler
 
-                if not self.has_permission_level(handler.permissionlevel, ctx):
+                if is_instance(handler, BotCommand) and not self.has_permission_level(handler.permissionlevel, ctx):
                     raise PermissionLevelError(f"Você não possui um nível de permissão igual ou superior à `{handler.permissionlevel.name}`")
 
                 args = command.args
@@ -705,7 +819,7 @@ class Bot:
 
                             # Se encontrarmos um pedaço que seja uma lista, temos uma outra PIPELINE, execute ela recursivamente antes para termos o resultado como uma string.
                             if isinstance(chunk, list):
-                                arg[i] = await self.handle_pipeline_execution(ctx, chunk, activator_args=activator_args, activator_flags=activator_flags)
+                                arg[i] = await self.handle_pipeline_execution(target_commands, ctx, chunk, activator_args=activator_args, activator_flags=activator_flags)
 
                                 # Recebemos uma string ou lista de strings?
                                 if not isinstance(arg[i], str) and not isinstance(arg[i], list):
@@ -737,17 +851,18 @@ class Bot:
         # Terminando todo o processamento desta PIPELINE, volte para cima.
         return pipeline_output
 
-    async def handle_command_execution(self, command: BotCommand, ctx: Context, args: list, flags: dict, received_pipe_data='', activator_args: list=None, activator_flags: dict=None):
+    async def handle_command_execution(self, command: Command, ctx: Context, args: list, flags: dict, received_pipe_data='', activator_args: list=None, activator_flags: dict=None):
         logging.info(f'Handling execution of {command.name}: {command}')
 
         output = None
 
         # Se estamos requisitando apenas ajuda.
         if 'h' in flags or 'help' in flags:
-            output = command.get_usage_embed(ctx)
+            output = command.get_usage_embed(ctx) if is_instance(command, BotCommand) else command.get_usage_text()
         else:
             # Precisamos definir quem são as menções recebidas por argumento (não posso depender de message.mentions, etc...)
-            self.extract_mentions_from(args, flags, ctx)
+            if is_instance(command, BotCommand):
+                self.extract_mentions_from(args, flags, ctx)
 
             # Se temos dados vindos da PIPELINE, aumentar os argumentos desse comando atual.
             if received_pipe_data:
@@ -803,6 +918,95 @@ class Bot:
             await self.set_playing_game(playing_list[index])
             kwargs['index'] = index + 1
 
+class ConnectionManager:
+    def __init__(self, bot, listen: str, port: int):
+        self.bot = bot
+        self.host = listen
+        self.port = port
+        self.open_server = None
+
+        self.handlers = {
+            "command_request": self.handle_command_request
+        }
+
+    def server_is_open(self):
+        return self.open_server != None
+
+    async def start(self):
+        assert not self.open_server
+
+        self.open_server = await asyncio.start_server(
+            self.callable_receive_connection,
+            self.host,
+            self.port,
+            start_serving=True
+        )
+
+    async def callable_receive_connection(self, reader, writer):
+        logging.info('callable_receive_connection: Received new connection')
+
+        data = await reader.readline()
+        while data and not reader.at_eof():
+            json_packet = None
+
+            try:
+                json_packet = json.loads(data)
+            except Exception:
+                logging.info('callable_receive_connection: Failed to parse json_packet')
+
+            if json_packet:
+                response = await self.handle_received_packet(json_packet)
+
+                if response:
+                    writer.write((json.dumps(response) + '\n').encode('utf-8'))
+                    await writer.drain()
+
+            data = await reader.readline()
+
+        writer.write_eof()
+        logging.info('callable_receive_connection: Closing connection')
+
+    async def handle_received_packet(self, packet):
+        # Packet em JSON:
+        # {
+        #     "type": "command_request",
+        #     "data": "echo teste 1 2 3"
+        # }
+
+        type = packet.get('type', None)
+        data = packet.get('data', None)
+
+        if type and type in self.handlers:
+            if not data:
+                logging.warn(f'handle_received_packet: Received packet without data')
+            
+            return await self.handlers[type](data)
+        else:
+            logging.info(f'handle_received_packet: Received unknown packet type: {type}')
+
+    async def handle_command_request(self, data):
+        logging.info(f'handle_command_request: Trying to handle command request for data: {data}')
+        
+        if not data:
+            return
+
+        current_context = CliContext(
+            self,
+            data,
+            io.StringIO()
+            # Se tivermos outros objetos do contexto atual associados, passar por argumento...
+        )
+
+        await self.bot.handle_cli_command_parse(
+            current_context,
+            data
+        )
+
+        return {
+            "type": "command_response",
+            "data": current_context.output_stream.getvalue()
+        }
+
 class GuildSettingsManager:
     def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=600):
         self.bot = bot
@@ -814,6 +1018,12 @@ class GuildSettingsManager:
         return await self.bot.get_database_connection()
 
     async def get_cacheable_guild_variable(self, guildid: int, key: str):
+        # @NOTE:
+        # Utilizando um sistema de "lazy load", aonde as variáveis vão sendo guardadas em memória a medida que são requisitadas
+        # para cada variavel existe um tempo de cache, se ele expirar, podemos pensar em 2 alterantivas:
+        # 1. Retirar da memória a variavel (pois assumimos que a Guild não usará ela por um bom tempo)
+        # 2. Deixar em memória, porém uma nova requisição que chegar, forçará a sua atualização com base no banco de dados (comportamento atual).
+        # para meio estranho não liberar memória, mas escrever um gerenciador para retirar da memória parece uma tarefa um pouco mais complicada.
         dal = GuildVariableDAL(await self.get_database_connection())
 
         if not guildid in self.guildmap:

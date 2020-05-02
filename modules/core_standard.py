@@ -28,24 +28,19 @@ class CHelp(BotCommand):
 
         if args:
             target = args[0]
-            target = self.bot.commands.get(target, None)
+            target = self.bot.commands.get_command_by_name(target)
 
             if target:
-                target = target.origin if is_instance(target, CommandAlias) else target
                 return target.get_usage_embed(message)
             else:
                 raise CommandError(f"O comando `{args[0]}` não existe.")
 
         embeds = [self.create_response_embed(message)]
         curr = embeds[0]
-        
-        show_hidden = 's' in flags or 'show-hidden' in flags
 
         i = 1
-        for key, value in self.bot.commands.items():
-            if is_instance(value, CommandAlias) or (value.hidden and not show_hidden):
-                continue
-            elif i % self.commands_per_page == 0:
+        for value in self.bot.commands.get_all_commands(show_hidden='s' in flags or 'show-hidden' in flags):
+            if i % self.commands_per_page == 0:
                 curr.title = "Navibot"
                 curr.description = str(text)
 
@@ -57,7 +52,7 @@ class CHelp(BotCommand):
             typestr = type(value).__name__
             mdlstr = type(value).__module__
 
-            text += f"`{key}` ({mdlstr}.{typestr})\n"
+            text += f"`{value.name}` ({mdlstr}.{typestr})\n"
 
             i += 1
 
