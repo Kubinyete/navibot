@@ -33,8 +33,16 @@ class ReactionType(Enum):
     FAILURE = '❌'
 
 class Context:
-    def __init__(self, bot, channel: discord.TextChannel=None, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
+    def __init__(self, bot):
         self.bot = bot
+
+    async def reply(self, response):
+        raise NotImplementedError()
+
+class BotContext(Context):
+    def __init__(self, bot, channel: discord.TextChannel=None, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
+        super().__init__(bot)
+        
         self.channel = channel
         self.author = author
         self.guild = guild
@@ -44,14 +52,19 @@ class Context:
         return self.bot.create_response_embed(self)
 
     async def reply(self, response):
+        if not self.channel and not self.author:
+            raise ValueError('Não é possível responder o contexto atual, não existe nenhum canal ou usuário selecionado.')
+
+        target = self.author if not self.channel else self.channel
+
         if isinstance(response, str) or isinstance(response, list):
             embed = self.create_response_embed()
             embed.description = ' '.join(response) if isinstance(response, list) else response
             
-            return await self.channel.send(embed=embed)
+            return await target.send(embed=embed)
 
         elif isinstance(response, discord.Embed):
-            return await self.channel.send(embed=response)
+            return await target.send(embed=response)
 
         elif isinstance(response, Slider):
             return await response.send()
@@ -66,21 +79,32 @@ class Context:
             embed = self.create_response_embed()
             embed.description = f':red_circle: **{type(response).__name__}**: {response}'
 
-            return await self.channel.send(embed=embed)
+            return await target.send(embed=embed)
 
         else:
-            raise ValueError('Não é possível responser a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+            raise ValueError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
 
 class CliContext(Context):
-    def __init__(self, bot, input_data: str, output_stream: io.StringIO, channel: discord.TextChannel=None, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
-        super().__init__(bot, channel, guild, author, message)
+    def __init__(self, bot, input_data: str, output_stream: io.StringIO, bot_context: BotContext=None):
+        super().__init__(bot)
 
         self.input_data = input_data
         self.output_stream = output_stream
+        self.bot_context = bot_context
 
-    async def reply(self, response):
-        response_data = None
+    def update_bot_context(self, target):
+        assert isinstance(target, discord.User) or isinstance(target, discord.TextChannel)
 
+        if isinstance(target, discord.User):
+            self.bot_context.author = target
+            self.bot_context.channel = None
+            self.bot_context.guild = None
+        else:
+            self.bot_context.author = self.bot_context.bot.client.user
+            self.bot_context.channel = target
+            self.bot_context.guild = target.guild
+
+    def format_response(self, response):
         if isinstance(response, str) or isinstance(response, list):
             response_data = '\n'.join(response) if isinstance(response, list) else response
         elif isinstance(response, discord.Embed):
@@ -90,10 +114,18 @@ class CliContext(Context):
         elif isinstance(response, Exception):
             response_data = f'{type(response).__name__}: {response}'
         else:
-            raise ValueError('Não é possível responser a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+            raise ValueError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+
+        return response_data
+
+    async def reply(self, response):
+        response_data = self.format_response(response)
 
         if response_data:
             self.output_stream.write(response_data)
+
+    async def say(self, response):
+        return await self.bot_context.reply(response)
 
 class Command:
     def __init__(self, bot):
@@ -169,6 +201,9 @@ class CliCommand(Command):
         super().__init__(bot)
 
         self.update_info(kwargs)
+
+    def get_usage_text(self):
+        return f"Uso: {self.name} {self.usage}\n\n{self.description}\n"
 
     async def run(self, ctx: CliContext, args: list, flags: dict):
         raise NotImplementedError()
@@ -739,7 +774,7 @@ class Bot:
             return
 
         # Contexto utilizado daqui em diante...
-        ctx = Context(
+        ctx = BotContext(
             self,
             message.channel,
             message.guild,
@@ -863,6 +898,7 @@ class Bot:
 
         # Se estamos requisitando apenas ajuda.
         if 'h' in flags or 'help' in flags:
+            # Se você sabe que é um comando do bot, volte em um "formato rico" (embed), se não, pegue por padrão apenas o valor "cru" (texto)
             output = command.get_usage_embed(ctx) if is_instance(command, BotCommand) else command.get_usage_text()
         else:
             # Precisamos definir quem são as menções recebidas por argumento (não posso depender de message.mentions, etc...)
@@ -938,35 +974,32 @@ class HConnectionManager(ModuleHook):
     async def callable_transmit_message(self, kwargs):
         message = kwargs.get('message')
 
-        # Para cada conexão, eviar a mensagem
+        # Só aceita mensagens por privado ou de um canal de texto
+        if not (isinstance(message.channel, discord.TextChannel) or isinstance(message.channel, discord.DMChannel)):
+            return
+
+        # Para cada conexão, enviar a mensagem
         for cliconn in self.connection_pool:
             asyncio.create_task(
                 cliconn.write_packet(
                     {
                         'type': 'message',
                         'data': {
-                            'channel': {
-                                'id': message.channel.id,
-                                'name': message.channel.name
-                            },
-                            'message': {
-                                'id': message.id,
-                                'content': message.content
-                            },
-                            'author': {
-                                'id': message.author.id,
-                                'name': message.author.name
-                            }
+                            'channel': {'id': message.channel.id, 'name': message.channel.name} if message.channel and isinstance(message.channel, discord.TextChannel) else None,
+                            'message': {'id': message.id,'content': message.content},
+                            'author': {'id': message.author.id,'name': message.author.name}
                         }
                     }
                 )
             )
 
 class CliConnection:
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, bot_context: BotContext):
         self.reader = reader
         self.writer = writer
         self.peername = writer.get_extra_info("peername")
+
+        self.bot_context = bot_context
 
     async def read_data(self):
         return await self.reader.readline()
@@ -1048,7 +1081,12 @@ class ConnectionManager:
         # Encapsule essa conexão em um objeto, para outros objetos (ModuleHook) tenham acesso por fora
         cliconn = CliConnection(
             reader,
-            writer
+            writer,
+            # Contexto do bot para que seja possível entender se é possível mandar uma mensagem em um canal de texto ou DM, etc...
+            # É persistente durante toda a conexão, só será removido da memória quando o cliente desconectar
+            BotContext(
+                self.bot
+            )
         )
 
         self.active_connections.append(cliconn)
@@ -1063,7 +1101,7 @@ class ConnectionManager:
                 logging.info('callable_receive_connection: Failed to parse json_packet')
 
             if json_packet:
-                response = await self.handle_received_packet(json_packet)
+                response = await self.handle_received_packet(json_packet, cliconn.bot_context)
 
                 if response:
                     await cliconn.write_packet(response)
@@ -1076,7 +1114,7 @@ class ConnectionManager:
 
         logging.info(f'callable_receive_connection: Closing connection for {peername}')
 
-    async def handle_received_packet(self, packet):
+    async def handle_received_packet(self, packet, persistent_bot_context: BotContext):
         # Packet em JSON:
         # {
         #     "type": "command_request",
@@ -1090,21 +1128,22 @@ class ConnectionManager:
             if not data:
                 logging.warn(f'handle_received_packet: Received packet without data')
             
-            return await self.handlers[type](data)
+            return await self.handlers[type](data, persistent_bot_context)
         else:
             logging.info(f'handle_received_packet: Received unknown packet type: {type}')
 
-    async def handle_command_request(self, data):
+    async def handle_command_request(self, data, persistent_bot_context: BotContext):
+        # Arg data pode ser um dict ou uma string ou até mesmo None
         logging.info(f'handle_command_request: Trying to handle command request for data: {data}')
         
         if not data:
             return
 
         current_context = CliContext(
-            self,
+            self.bot,
             data,
-            io.StringIO()
-            # Se tivermos outros objetos do contexto atual associados, passar por argumento...
+            io.StringIO(),
+            persistent_bot_context
         )
 
         await self.bot.handle_cli_command_parse(

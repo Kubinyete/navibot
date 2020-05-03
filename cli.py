@@ -21,6 +21,8 @@ class ClientApp:
         self.command_buffer = io.StringIO()
         self.input_chars_written = 0
 
+        self.pending_read_packet_task = None
+
     def prepare_terminal(self):
         assert self.prev_term_attr is None
 
@@ -141,6 +143,9 @@ class ClientApp:
     async def handle_receive_command(self, writer: asyncio.StreamWriter, command_string: str):
         if command_string in ('exit', 'quit'):
             self.is_exiting = True
+
+            if self.pending_read_packet_task:
+                self.pending_read_packet_task.cancel()
         else:
             await self.handle_send_packet(
                 writer, 
@@ -152,17 +157,24 @@ class ClientApp:
 
     async def handle_recv_packet_loop(self, reader: asyncio.StreamReader):
         while not self.is_exiting:
-            data = await reader.readline()
-            while data:
-                try:
-                    json_packet = json.loads(data)
-                except Exception as e:
-                    self.write(f'ERROR: Received invalid json_packet from server: {type(e).__name__}: {e}')
-                    return
+            try:
+                self.pending_read_packet_task = asyncio.create_task(reader.readline())
+                data = await self.pending_read_packet_task
 
-                await self.handle_receive_packet(json_packet)
-                
-                data = await reader.readline()
+                while data:
+                    try:
+                        json_packet = json.loads(data)
+                    except Exception as e:
+                        self.write(f'ERROR: Received invalid json_packet from server: {type(e).__name__}: {e}')
+                        return
+
+                    await self.handle_receive_packet(json_packet)
+                    
+                    self.pending_read_packet_task = asyncio.create_task(reader.readline())
+                    data = await self.pending_read_packet_task
+            except asyncio.CancelledError:
+                # self.write('Running task pending_read_packet_task was cancelled')
+                pass
 
     async def handle_receive_packet(self, packet: dict):
         type = packet.get('type', None)
@@ -173,11 +185,11 @@ class ClientApp:
                 if data:
                     self.write(str(data))
             elif type == 'message':
-                channel_name = data['channel']['name']
+                channel_name = f"#{data['channel']['name']} {data['channel']['id']}" if data['channel'] else 'Direct Message'
                 author_name = data['author']['name']
                 content  = data['message']['content']
 
-                self.write(f'\033[1;33m[#{channel_name}]\033[0m <\033[4;31m{author_name}\033[0m>: {content}')
+                self.write(f'\033[1;33m[{channel_name}]\033[0m <\033[4;31m{author_name}\033[0m>: {content}')
             else:
                 self.write(f'ERROR: Received invalid packet type from server')
         except IndexError:
