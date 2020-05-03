@@ -38,6 +38,8 @@ class ClientApp:
         termios.tcsetattr(sys.stdin, termios.TCSANOW, curr)
 
     def rollback_terminal(self):
+        assert self.prev_term_attr != None
+
         termios.tcsetattr(sys.stdin, termios.TCSANOW, self.prev_term_attr)
 
     def run(self):
@@ -47,8 +49,10 @@ class ClientApp:
             self.loop.run_until_complete(
                 self.arun()
             )
+            
+            self.write(f'Exiting gracefully...')
         except KeyboardInterrupt:
-            pass
+            self.write(f'KeyboardInterrupt received, exiting CLI...')
         except Exception as e:
             print(f'ERROR: {type(e).__name__}: {e}')
         finally:
@@ -89,7 +93,7 @@ class ClientApp:
                 self.input_chars_written = 0
 
                 sys.stdout.write("\n")
-                sys.stdout.write(f'\033[1;35mNavibot\033[0m \033[1;31m$\033[0m')
+                sys.stdout.write(f'\033[1;35mNavibot\033[0m \033[1;31m$\033[0m ')
             
             # Pede para dar flush na stdout
             sys.stdout.flush()
@@ -123,25 +127,28 @@ class ClientApp:
                     self.command_buffer.truncate(self.command_buffer.tell() - 1)
                     self.command_buffer.seek(self.command_buffer.tell() - 1)
             elif byte == '\x1b':
-                # Input "quebrado"
-                # Ex: CTRL + V
+                # @TODO:
+                # Esqueci exatamente qual é esse código, mas sei que tem haver com "teclas compostas"
                 pass
             elif byte == '\n':
-                command_string = self.command_buffer.getvalue()
-
-                await self.handle_send_packet(
-                    writer, 
-                    {
-                        'type': 'command_request',
-                        'data': command_string
-                    }
-                )
-
+                await self.handle_receive_command(writer, self.command_buffer.getvalue())
                 self.write_input(True)
             else:
                 self.command_buffer.write(byte)
             
             self.write_input()
+
+    async def handle_receive_command(self, writer: asyncio.StreamWriter, command_string: str):
+        if command_string in ('exit', 'quit'):
+            self.is_exiting = True
+        else:
+            await self.handle_send_packet(
+                writer, 
+                {
+                    'type': 'command_request',
+                    'data': command_string
+                }
+            )
 
     async def handle_recv_packet_loop(self, reader: asyncio.StreamReader):
         while not self.is_exiting:
@@ -154,19 +161,27 @@ class ClientApp:
                     return
 
                 await self.handle_receive_packet(json_packet)
+                
                 data = await reader.readline()
-            
-            await asyncio.sleep(1)
 
     async def handle_receive_packet(self, packet: dict):
         type = packet.get('type', None)
         data = packet.get('data', None)
 
-        if type == 'command_response':
-            if data:
-                self.write(str(data))
-        else:
-            self.write(f'ERROR: Received invalid packet type from server')
+        try:
+            if type == 'command_response':
+                if data:
+                    self.write(str(data))
+            elif type == 'message':
+                channel_name = data['channel']['name']
+                author_name = data['author']['name']
+                content  = data['message']['content']
+
+                self.write(f'\033[1;33m[#{channel_name}]\033[0m <\033[4;31m{author_name}\033[0m>: {content}')
+            else:
+                self.write(f'ERROR: Received invalid packet type from server')
+        except IndexError:
+            self.write(f'ERROR: Received packet but missing a key value, skipping...')
 
     async def handle_send_packet(self, writer: asyncio.StreamWriter, packet: dict):
         writer.write((json.dumps(packet) + '\n').encode('utf-8'))

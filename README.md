@@ -85,7 +85,7 @@ class HWelcomeMessage(ModuleHook):
     
     def run(self):
         self.bind_event(
-            'on_member_join',
+            'member_join',
             self.callable_receive_member_join
         )
 ```

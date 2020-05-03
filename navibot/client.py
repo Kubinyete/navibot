@@ -82,7 +82,7 @@ class CliContext(Context):
         response_data = None
 
         if isinstance(response, str) or isinstance(response, list):
-            response_data = ' '.join(response) if isinstance(response, list) else response
+            response_data = '\n'.join(response) if isinstance(response, list) else response
         elif isinstance(response, discord.Embed):
             response_data = response.description
         elif isinstance(response, ReactionType):
@@ -315,7 +315,7 @@ class Client(discord.Client):
         await self.dispatch_event('reaction_add', reaction=reaction, user=user)
 
     async def on_member_join(self, member: discord.Member):
-        await self.dispatch_event('on_member_join', member=member)
+        await self.dispatch_event('member_join', member=member)
 
     def listen(self, token):
         self.run(token)
@@ -405,7 +405,7 @@ class CommandsManager:
         cmds = list()
         
         for value in self.commands.values():
-            if not isinstance(value, CommandAlias) and (show_hidden or not value.hidden):
+            if not isinstance(value, CommandAlias) and (is_instance(value, CliCommand) or show_hidden or not value.hidden):
                 cmds.append(value)
 
         return cmds
@@ -426,7 +426,7 @@ class HooksManager:
         hook.destroy()
 
     def clear(self):
-        for hook in self.hooks:
+        for hook in reversed(self.hooks):
             self.unregister_hook(hook)
 
         assert not self.hooks
@@ -475,7 +475,7 @@ class Bot:
             self,
             self.config.get('connections.listen', '127.0.0.1'),
             self.config.get('connections.port', 7777)
-        )
+        ) if self.config.get('connections.enable', False) else None
 
         # Inicialização de tudo
         self.load_all_modules()
@@ -492,9 +492,14 @@ class Bot:
         # Intervalo que fica rodando de fundo para a troca de atividades.
         self.playing_interval = None
 
-    def load_all_modules(self):
-        self.commands.clear()
-        self.hooks.clear()
+    def load_all_modules(self, is_reloading: bool=False):
+        if is_reloading:
+            self.commands.clear()
+            self.hooks.clear()
+
+            for reload_notification_target in (self.connection_manager, ):
+                if reload_notification_target:
+                    reload_notification_target.notify_reload()
 
         # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
         self.load_modules(f'{self.curr_path}/modules', force_reload=True)
@@ -603,7 +608,7 @@ class Bot:
         # Se isso falhar, voltará o Exception para o HotReload
         self.config.load()
 
-        self.load_all_modules()
+        self.load_all_modules(True)
 
     def listen(self):
         self.client.listen(self.config.get('global.token'))
@@ -714,7 +719,7 @@ class Bot:
     async def receive_ready(self, kwargs):
         logging.info(f"Successfully logged in")
 
-        if not self.connection_manager.server_is_open():
+        if self.connection_manager and not self.connection_manager.server_is_open():
             await self.connection_manager.start()
 
         if self.playing_interval is None:
@@ -918,6 +923,69 @@ class Bot:
             await self.set_playing_game(playing_list[index])
             kwargs['index'] = index + 1
 
+class HConnectionManager(ModuleHook):
+    def __init__(self, bot, connection_pool: list):
+        super().__init__(bot)
+
+        self.connection_pool = connection_pool
+
+    def run(self):
+        self.bind_event(
+            'message',
+            self.callable_transmit_message
+        )
+
+    async def callable_transmit_message(self, kwargs):
+        message = kwargs.get('message')
+
+        # Para cada conexão, eviar a mensagem
+        for cliconn in self.connection_pool:
+            asyncio.create_task(
+                cliconn.write_packet(
+                    {
+                        'type': 'message',
+                        'data': {
+                            'channel': {
+                                'id': message.channel.id,
+                                'name': message.channel.name
+                            },
+                            'message': {
+                                'id': message.id,
+                                'content': message.content
+                            },
+                            'author': {
+                                'id': message.author.id,
+                                'name': message.author.name
+                            }
+                        }
+                    }
+                )
+            )
+
+class CliConnection:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        self.reader = reader
+        self.writer = writer
+        self.peername = writer.get_extra_info("peername")
+
+    async def read_data(self):
+        return await self.reader.readline()
+
+    async def write_packet(self, packet: dict):
+        logging.info(f'write_packet: Sending packet {packet} to {self.peername}')
+
+        self.writer.write(
+            (json.dumps(packet) + '\n').encode('utf-8')
+        )
+
+        await self.writer.drain()
+
+    def write_eof(self):
+        self.writer.write_eof()
+
+    def at_eof(self):
+        return self.reader.at_eof()
+
 class ConnectionManager:
     def __init__(self, bot, listen: str, port: int):
         self.bot = bot
@@ -925,12 +993,40 @@ class ConnectionManager:
         self.port = port
         self.open_server = None
 
+        self.bot_hook = None
+
         self.handlers = {
             "command_request": self.handle_command_request
         }
+        
+        self.active_connections = []
+
+    def notify_reload(self):
+        assert self.bot_hook
+        self.bot_hook = None
+        
+        # O bot recebeu um reload, portato, nosso hook de mensagens caiu!
+        self.hook_required_events()
 
     def server_is_open(self):
         return self.open_server != None
+
+    def hook_required_events(self):
+        assert self.bot.hooks
+        assert not self.bot_hook
+
+        self.bot_hook = HConnectionManager(
+            self.bot,
+            self.active_connections
+        )
+
+        self.bot.hooks.register_hook(self.bot_hook)
+
+    def unhook_required_events(self):
+        assert self.bot.hooks
+        assert self.bot_hook
+
+        self.bot.hooks.unregister_hook(self.bot_hook)
 
     async def start(self):
         assert not self.open_server
@@ -942,11 +1038,23 @@ class ConnectionManager:
             start_serving=True
         )
 
-    async def callable_receive_connection(self, reader, writer):
-        logging.info('callable_receive_connection: Received new connection')
+        self.hook_required_events()
 
-        data = await reader.readline()
-        while data and not reader.at_eof():
+    async def callable_receive_connection(self, reader, writer):
+        peername = writer.get_extra_info("peername")
+
+        logging.info(f'callable_receive_connection: Received new connection from {peername}')
+
+        # Encapsule essa conexão em um objeto, para outros objetos (ModuleHook) tenham acesso por fora
+        cliconn = CliConnection(
+            reader,
+            writer
+        )
+
+        self.active_connections.append(cliconn)
+
+        data = await cliconn.read_data()
+        while data and not cliconn.at_eof():
             json_packet = None
 
             try:
@@ -958,13 +1066,15 @@ class ConnectionManager:
                 response = await self.handle_received_packet(json_packet)
 
                 if response:
-                    writer.write((json.dumps(response) + '\n').encode('utf-8'))
-                    await writer.drain()
+                    await cliconn.write_packet(response)
 
-            data = await reader.readline()
+            data = await cliconn.read_data()
 
         writer.write_eof()
-        logging.info('callable_receive_connection: Closing connection')
+
+        self.active_connections.remove(cliconn)
+
+        logging.info(f'callable_receive_connection: Closing connection for {peername}')
 
     async def handle_received_packet(self, packet):
         # Packet em JSON:
