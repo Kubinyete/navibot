@@ -10,6 +10,11 @@
     "database": {
         "connection_string": "mysql://navibot:navibot@192.168.1.102/navibotdb"
     },
+    "connections": {
+        "enable": true,
+        "listen": "127.0.0.1",
+        "port": 7777
+    },
     "guild_settings": {
         "bot_prefix": ";",
         "nsfw_disabled": true,
@@ -24,35 +29,5 @@
             "key": "TOKEN_OR_API_KEY"
         }
     },
-    "interpreted_commands": [
-        {"name": "omegalul", "value": "embed -img https://cdn.frankerfacez.com/emoticon/128054/4 -t OMEGALUL -d \"{getarg --all}\""},
-        {"name": "pepega", "value": "embed -img https://cdn.frankerfacez.com/emoticon/243789/4 -t Pepega -d \"{getarg --all}\""},
-        {"name": "pepehands", "value": "embed -img https://cdn.frankerfacez.com/emoticon/231552/4 -t PepeHands -d \"{getarg --all}\""},
-        {"name": "pogu", "value": "embed -img https://cdn.frankerfacez.com/emoticon/256055/4 -t PogU -d \"{getarg --all}\""},
-        {"name": "5head", "value": "embed -img https://cdn.frankerfacez.com/emoticon/239504/4 -t 5Head -d \"{getarg --all}\""},
-        {"name": "yep", "value": "embed -img https://cdn.frankerfacez.com/emoticon/418189/4 -t YEP -d \"{getarg --all}\""},
-        {"name": "kannafu", "value": "embed -img https://cdn.frankerfacez.com/emoticon/173046/4 -t kannaFU -d \"{getarg --all}\""},
-        {"name": "thinknico", "value": "embed -img https://cdn.frankerfacez.com/emoticon/334956/4 -t thinkNico -d \"{getarg --all}\""},
-
-        {"name": "monkas", "value": "embed -img https://cdn.discordapp.com/emojis/588215460084973578.gif?v=1 -t monkaS -d \"{getarg --all}\""},
-        {"name": "roach", "value": "embed -img https://cdn.discordapp.com/emojis/652158690107064355.gif?v=1 -t ROACH -d \"{getarg --all}\""},
-
-        {"name": "gachibass", "value": "embed -img https://i.imgur.com/5hOjdYT.gif -t gachiBASS -d \"{getarg --all}\""},
-        {"name": "gachihyper", "value": "embed -img https://i.imgur.com/lt8uBz4.gif -t gachiHYPER -d \"{getarg --all}\""},
-        {"name": "gachipls", "value": "embed -img https://i.imgur.com/ywuXkuw.gif -t GachiPls -d \"{getarg --all}\""},
-        {"name": "kumapls", "value": "embed -img https://i.imgur.com/pQjRbbr.gif -t kumaPls -d \"{getarg --all}\""},
-        {"name": "kirbyjam", "value": "embed -img https://i.imgur.com/nApNW9O.gif -t kirbyJam -d \"{getarg --all}\""},
-        
-        {"name": "ayaya", "value": "embed -img \"{choice https://cdn.frankerfacez.com/emoticon/162146/4 https://cdn.frankerfacez.com/emoticon/250475/4 https://i.imgur.com/jS7AgX5.gif}\" -t AYAYA -d \"{getarg --all}\""},
-        {"name": "rainbowpls", "value": "embed -img \"{choice https://i.imgur.com/WYVUg98.gif https://i.imgur.com/XWvZihi.gif}\" -t RainbowPls -d \"{getarg --all}\""},
-        {"name": "chikapls", "value": "embed -img \"{choice https://i.imgur.com/7mRPZXg.gif https://i.imgur.com/gQMkb2L.gif https://i.imgur.com/8URcIR1.gif}\" -t chikaPls -d \"{getarg --all}\""},
-        
-        {"name": "shrug", "value": "echo \"{getarg --all} ¯\\\\_(ツ)_/¯\""},
-        {"name": "tableflip", "value": "echo \"{getarg --all} (╯°□°）╯︵ ┻━┻\""},
-        {"name": "unflip", "value": "echo \"{getarg --all} ┬─┬ ノ( ゜-゜ノ)\""},
-        {"name": "lenny", "value": "echo \"{getarg --all} ( ͡° ͜ʖ ͡°)\""},
-
-        {"name": "github", "value": "embed -t Navibot -url https://github.com/Kubinyete/navibot -timg https://avatars0.githubusercontent.com/u/23388918 -d \"Clique [aqui](https://github.com/Kubinyete/navibot) para acessar o reposítorio do Github!\""},
-        {"name": "repo", "value": "github"}
-    ]
+    "interpreted_commands": []
 }
