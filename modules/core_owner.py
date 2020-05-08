@@ -14,28 +14,26 @@ class CSetAvatar(BotCommand):
             name = "setavatar",
             description = "Edita o perfil do bot atual, recebe um URL da imagem nova de perfil, a qual será baixada e enviada.",
             usage = "URL",
-            permissionlevel = PermissionLevel.BOT_OWNER
+            permissionlevel = PermissionLevel.BOT_OWNER,
+            hidden = True
         )
 
-        self.httpsession = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=60)
-        )
+        self.discord_edit_timeout = 15
 
-        self.discord_edit_timeout = 30
-
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         avatar_url = ' '.join(args)
         avatar_bytes = None
 
         try:
-            async with self.httpsession.get(avatar_url) as resp:
-                if resp.status == 200:
-                    avatar_bytes = await resp.read()
-                else:
-                    raise CommandError("Não foi possível obter o novo avatar através da URL fornecida, o destino não retornou OK.")
+            with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as sess:
+                async with sess.get(avatar_url) as resp:
+                    if resp.status == 200:
+                        avatar_bytes = await resp.read()
+                    else:
+                        raise CommandError("Não foi possível obter o novo avatar através da URL fornecida, o destino não retornou OK.")
         except aiohttp.ClientError as e:
             logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível obter o novo avatar através da URL fornecida.")
@@ -66,14 +64,15 @@ class CSetName(BotCommand):
             name = "setname",
             description = "Edita o perfil do bot atual, recebe um novo nome de usuário.",
             usage = "[nome...]",
-            permissionlevel = PermissionLevel.BOT_OWNER
+            permissionlevel = PermissionLevel.BOT_OWNER,
+            hidden = True
         )
 
         self.discord_edit_timeout = 10
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         username = ' '.join(args)
 
@@ -98,12 +97,13 @@ class CGuildVariables(BotCommand):
             aliases = ['var', 'gvar'],
             description = "Gerencia as variáveis da Guild atual.",
             usage = "variavel [novo valor] [--list] [--reset]",
-            permissionlevel=PermissionLevel.BOT_OWNER
+            permissionlevel=PermissionLevel.BOT_OWNER,
+            hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         gsm = self.get_guild_settings_manager()
-        gvars = await gsm.get_all_guild_variables(message.guild.id)
+        gvars = await gsm.get_all_guild_variables(ctx.channel.guild.id)
 
         if 'list' in flags:
             text = ''
@@ -113,7 +113,7 @@ class CGuildVariables(BotCommand):
             return text
         else:
             if not args:
-                return self.get_usage_embed(message)
+                return self.get_usage_embed(ctx)
 
             try:
                 expected_variable = gvars[args[0]]
@@ -164,12 +164,13 @@ class CAddCommand(BotCommand):
             name = "addcommand",
             description = "Adiciona um comando interpretado.",
             usage = 'nome [comando...]',
-            permissionlevel = PermissionLevel.BOT_OWNER
+            permissionlevel = PermissionLevel.BOT_OWNER,
+            hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if len(args) < 2:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         cmd = ' '.join(args[1:])
 
@@ -177,8 +178,8 @@ class CAddCommand(BotCommand):
             self.bot.add_interpreted_command(
                 InterpretedCommand(
                     self.bot,
-                    args[0],
-                    cmd
+                    cmd,
+                    name = args[0]
                 )
             )
 
@@ -195,12 +196,13 @@ class CRemoveCommand(BotCommand):
             name = "removecommand",
             description = "Remove um comando interpretado.",
             usage = 'nome',
-            permissionlevel = PermissionLevel.BOT_OWNER
+            permissionlevel = PermissionLevel.BOT_OWNER,
+            hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         try:
             self.bot.remove_interpreted_command(args[0])
@@ -210,16 +212,17 @@ class CRemoveCommand(BotCommand):
             logging.exception(f'CREMOVECOMMAND: {type(e).__name__}: {e}')
             raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n\n`{e}`')
 
-class CHotReload(BotCommand):
+class CReload(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = "hotreload",
+            name = "reload",
             description = "Efetua a reinicialização de todos os comandos e o processo de inicialização, consequentemente, carregando novamente os comandos.",
-            permissionlevel = PermissionLevel.BOT_OWNER
+            permissionlevel = PermissionLevel.BOT_OWNER,
+            hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         try:
             await self.bot.reload_all_modules()
             return ReactionType.SUCCESS

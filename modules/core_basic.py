@@ -18,11 +18,31 @@ class CEcho(BotCommand):
             usage = "[texto...]"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         return args
+
+class CSay(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = 'say',
+            aliases = ['s'],
+            description = "Faz com que o bot fale a mensagem informada.",
+            usage = "[texto...]"
+        )
+
+    async def run(self, ctx, args, flags):
+        if not args:
+            return self.get_usage_embed(ctx)
+        
+        # @HACK: Utiliza o método diretamente para poder fazer com que o bot não utilize embeds por padrão
+        await ctx.reply(args, use_embed_as_default=False)
+
+        # Força a PIPELINE a não poder continuar
+        return None
 
 class CFullwidth(BotCommand):
     def __init__(self, bot):
@@ -34,9 +54,9 @@ class CFullwidth(BotCommand):
             usage = "[texto...]"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         return [string_fullwidth_alphanumeric(arg) for arg in args]
 
@@ -50,11 +70,11 @@ class CClap(BotCommand):
             usage = "[texto...]"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
-        return f":clap: {' :clap: '.join(args)} :clap:"
+        return f"👏 {' 👏 '.join(args)} 👏"
 
 class CDateFormat(BotCommand):
     def __init__(self, bot):
@@ -63,12 +83,13 @@ class CDateFormat(BotCommand):
             name = 'dateformat',
             aliases = ['datefmt'],
             description = "Retorna a data ou horário formatado de acordo com a string informada (Ex: %H:%M:%S ou %d/%m/%Y).",
-            usage = 'formato'
+            usage = 'formato',
+            hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         fmt = ' '.join(args)
 
@@ -82,7 +103,10 @@ class CTime(InterpretedCommand):
         super().__init__(
             bot,
             name = 'time',
-            command = 'dateformat %H:%M:%S'
+            aliases = ['tm'],
+            command = 'dateformat %H:%M:%S',
+            description = 'Retorna o horário atual dado pelo formato %H:%M:%S.',
+            hidden = True
         )
 
 class CDate(InterpretedCommand):
@@ -90,7 +114,10 @@ class CDate(InterpretedCommand):
         super().__init__(
             bot,
             name = 'date',
-            command = 'dateformat %d/%m/%Y'
+            aliases = ['dt'],
+            command = 'dateformat %d/%m/%Y',
+            description = 'Retorna a data atual dado pelo formato %d/%m/%Y.',
+            hidden = True
         )
 
 class CFormat(BotCommand):
@@ -100,10 +127,11 @@ class CFormat(BotCommand):
             name = 'format',
             aliases = ['fmt'],
             description = "Aplica todas as alterações passadas por argumento.",
-            usage = "[-u|--upper] [-l|--lower] [-r|--reverse]"
+            usage = "[-u|--upper] [-l|--lower] [-r|--reverse]",
+            hidden = True
         )
 
-    def transform(self, transf, flags):
+    def transform(self, transf: str, flags: dict):
         for flag in flags.keys():
             if flag in ('u', 'upper'):
                 transf = transf.upper()
@@ -114,9 +142,9 @@ class CFormat(BotCommand):
 
         return transf
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         return [self.transform(transf, flags) for transf in args]
 
@@ -146,7 +174,7 @@ class CRoll(BotCommand):
             usage = "[min=0] [max=6]"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         minv = 0
         maxv = 6
 
@@ -170,13 +198,13 @@ class CExpressionParser(BotCommand):
             bot,
             name = "expr",
             aliases = ['calc', 'bc'],
-            description = "Calcula a expressão matemática informada (Ex: 1 + 2 (2 / 4) * 9).",
+            description = "Calcula a expressão matemática informada (Ex: 1 + 2 (2 / 4) * 9), atualmente suporta os operadores: +, -, *, /, ^ e %.",
             usage = "[expressao...]"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         try:
             return str(ExpressionParser(' '.join(args)).parse().evaluate())
@@ -200,27 +228,25 @@ class CGetMember(BotCommand):
 
         self.allowed_attr = ('name', 'id', 'nick', 'display_name', 'guild', 'joined_at', 'status', 'mention')
 
-    async def run(self, message, args, flags):
-        assert message.guild
-
+    async def run(self, ctx, args, flags):
         users = flags.get('mentions', None)
         
         if 'self' in flags:
-            target = message.author
+            target = ctx.author
         else:
             target = users[0] if users else None
 
         if not target:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         # @HACK: Atribuir target como se fosse o novo author da mensagem
-        message.author = target
+        ctx.author = target
 
         ret = []
 
         for key in flags.keys():
             if key == 'permissionlevel':
-                ret.append(self.bot.rate_author_permission_level(message).name)
+                ret.append(self.bot.rate_author_permission_level(ctx).name)
             elif key in self.allowed_attr:
                 tmp = getattr(target, key, None)
 
@@ -240,7 +266,7 @@ class CGetArg(BotCommand):
             hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         pipeline_args = flags.get('activator_args', None)
         
         if pipeline_args is None:
@@ -261,33 +287,30 @@ class CGetArg(BotCommand):
             else:
                 raise CommandError('É preciso informar um indice válido.')
 
-class CArgCount(BotCommand):
+class CCount(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = "argcount",
-            aliases = ['argc'],
+            name = "count",
+            aliases = ['co'],
             description = "Retorna o tamanho da lista de argumentos recebidos.",
             hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         return str(len(args))
 
-class CArgLen(BotCommand):
+class CLen(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = "arglen",
-            aliases = ['argl'],
+            name = "len",
+            aliases = ['le'],
             description = "Retorna a soma do tamanho de todos os argumentos recebidos.",
             hidden = True
         )
 
-    async def run(self, message, args, flags):
-        if not args:
-            return self.get_usage_embed(message)
-
+    async def run(self, ctx, args, flags):
         ilen = 0
         for a in args:
             ilen += len(a)
@@ -305,9 +328,9 @@ class CSubstr(BotCommand):
             hidden = True
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         en = None
 

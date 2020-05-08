@@ -21,6 +21,20 @@ from navibot.errors import *
 from navibot.database.dal import GuildVariableDAL
 from navibot.database.models import GuildVariable
 
+class INotifiable:
+    def notify_reload(self):
+        raise NotImplementedError()
+
+    def notify_shutdown(self):
+        raise NotImplementedError()
+
+class INotifiableAsync(INotifiable):
+    async def notify_reload(self):
+        raise NotImplementedError()
+    
+    async def notify_shutdown(self):
+        raise NotImplementedError()
+
 class PermissionLevel(Enum):
     NONE = auto()
     GUILD_MOD = auto()
@@ -40,28 +54,41 @@ class Context:
         raise NotImplementedError()
 
 class BotContext(Context):
-    def __init__(self, bot, channel: discord.TextChannel=None, guild: discord.Guild=None, author: discord.User=None, message: discord.Message=None):
+    def __init__(self, bot, channel: discord.TextChannel=None, author: discord.User=None, message: discord.Message=None):
         super().__init__(bot)
         
         self.channel = channel
         self.author = author
-        self.guild = guild
         self.message = message
 
     def create_response_embed(self):
-        return self.bot.create_response_embed(self)
+        e = discord.Embed( 
+            color=discord.Color.magenta()
+        )
 
-    async def reply(self, response):
+        if self.author:
+            e.set_footer(
+                text=self.author.name, 
+                icon_url=self.author.avatar_url_as(size=32)
+            )
+
+        return e
+
+    async def reply(self, response, use_embed_as_default: bool=True):
         if not self.channel and not self.author:
-            raise ValueError('Não é possível responder o contexto atual, não existe nenhum canal ou usuário selecionado.')
+            raise BotError('Não é possível responder o contexto atual, não existe nenhum canal ou usuário selecionado.')
 
         target = self.author if not self.channel else self.channel
 
         if isinstance(response, str) or isinstance(response, list):
-            embed = self.create_response_embed()
-            embed.description = ' '.join(response) if isinstance(response, list) else response
+            text = ' '.join(response) if isinstance(response, list) else response
             
-            return await target.send(embed=embed)
+            if use_embed_as_default:
+                embed = self.create_response_embed()
+                embed.description = text
+                return await target.send(embed=embed)
+            else:
+                return await target.send(text)
 
         elif isinstance(response, discord.Embed):
             return await target.send(embed=response)
@@ -71,38 +98,41 @@ class BotContext(Context):
 
         elif isinstance(response, ReactionType):
             if not self.message:
-                raise AttributeError('É preciso vincular uma mensagem a este contexto para poder adicionar uma reação.')
+                raise BotError('É preciso vincular uma mensagem a este contexto para poder adicionar uma reação.')
 
             return await self.message.add_reaction(response.value)
 
         elif isinstance(response, Exception):
             embed = self.create_response_embed()
-            embed.description = f':red_circle: **{type(response).__name__}**: {response}'
-
+            embed.description = f'{ReactionType.FAILURE.value} **{type(response).__name__}**: {response}'
             return await target.send(embed=embed)
 
         else:
-            raise ValueError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+            raise BotError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
 
 class CliContext(Context):
-    def __init__(self, bot, input_data: str, output_stream: io.StringIO, bot_context: BotContext=None):
+    def __init__(self, bot, input_data: str, output_data: io.StringIO, botcontext: BotContext=None):
         super().__init__(bot)
 
         self.input_data = input_data
-        self.output_stream = output_stream
-        self.bot_context = bot_context
+        self.output_data = output_data
+        self.botcontext = botcontext
 
-    def update_bot_context(self, target):
+    def extract_output_data(self):
+        data = self.output_data.getvalue()
+        self.output_data.seek(0)
+        self.output_data.truncate(0)
+        return data
+
+    def update_botcontext_target(self, target):
         assert isinstance(target, discord.User) or isinstance(target, discord.TextChannel)
 
         if isinstance(target, discord.User):
-            self.bot_context.author = target
-            self.bot_context.channel = None
-            self.bot_context.guild = None
+            self.botcontext.author = target
+            self.botcontext.channel = None
         else:
-            self.bot_context.author = self.bot_context.bot.client.user
-            self.bot_context.channel = target
-            self.bot_context.guild = target.guild
+            self.botcontext.author = None
+            self.botcontext.channel = target
 
     def format_response(self, response):
         if isinstance(response, str) or isinstance(response, list):
@@ -114,7 +144,7 @@ class CliContext(Context):
         elif isinstance(response, Exception):
             response_data = f'{type(response).__name__}: {response}'
         else:
-            raise ValueError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
+            raise BotError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
 
         return response_data
 
@@ -122,10 +152,10 @@ class CliContext(Context):
         response_data = self.format_response(response)
 
         if response_data:
-            self.output_stream.write(response_data)
+            self.output_data.write(response_data)
 
-    async def say(self, response):
-        return await self.bot_context.reply(response)
+    async def say(self, response, use_embed_as_default: bool=False):
+        return await self.botcontext.reply(response, use_embed_as_default=use_embed_as_default)
 
 class Command:
     def __init__(self, bot):
@@ -155,28 +185,22 @@ class BotCommand(Command):
     # @TODO:
     # Parar de usar enable_usermap, pensar em uma outra forma de possuir uma "memória volátil"
     # para os comandos usarem dependendo do contexto
-    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False, enable_usermap: bool=False, **kwargs):
+    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False, enable_usermap: bool=False, supported_args_type: tuple=(str, ), **kwargs):
         super().__init__(bot)
-
-        self.update_info(kwargs)
 
         self.permissionlevel = permissionlevel
         self.hidden = hidden
+        self.supported_args_type = supported_args_type
 
-        self.enable_usermap = enable_usermap
-        
-        if self.enable_usermap:
-            self.usermap = dict()
+        self.enable_usermap = enable_usermap        
+        self.usermap = dict() if enable_usermap else None
 
-    def create_response_embed(self, ctx: Context):
-        return self.bot.create_response_embed(ctx)
+        self.update_info(kwargs)
 
-    def get_usage_embed(self, ctx: Context):
-        embed = self.create_response_embed(ctx)
-
+    def get_usage_embed(self, ctx: BotContext):
+        embed = ctx.create_response_embed()
         embed.description = self.get_usage_text()
         embed.title = f"{self.name}" if not self.aliases else f"{self.name} {self.aliases}"
-
         return embed
 
     def get_user_storage(self, author: discord.User):
@@ -190,11 +214,23 @@ class BotCommand(Command):
 
     def get_guild_settings_manager(self):
         assert self.bot.guildsettings
-
         return self.bot.guildsettings
 
-    async def run(self, ctx: Context, args: list, flags: dict):
+    async def run(self, ctx: BotContext, args: list, flags: dict):
         raise NotImplementedError()
+
+    # Wrapper para poder receber qualquer tipo de argumento e verificar
+    # se o comando suporta aquele tipo de entrada.
+    async def run_wrapper(self, ctx: BotContext, args, flags: dict):
+        for arg in args:
+            if not type(arg) in self.supported_args_type:
+                raise CommandError(f'O comando `{self.name}` não recebeu um tipo de dados esperado como argumento...\n\nEsperado: `{self.supported_args_type}`\nObtido: `{type(arg)}`')
+
+        return await self.run(
+            ctx,
+            args,
+            flags
+        )
 
 class CliCommand(Command):
     def __init__(self, bot, **kwargs):
@@ -209,17 +245,13 @@ class CliCommand(Command):
         raise NotImplementedError()
 
 class InterpretedCommand(BotCommand):
-    def __init__(self, bot, name: str, command: str, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False):
-        super().__init__(bot, permissionlevel=permissionlevel, enable_usermap=False, hidden=hidden, name=name)
+    def __init__(self, bot, command: str, **kwargs):
+        super().__init__(bot, **kwargs)
 
         self.command = command
 
-    def get_usage_text(self):
-        return f'O comando `{self.name}` é interpretado e pode ser traduzido para:\n\n`{self.command}`'
-
-    async def run(self, ctx: Context, args: list, flags: dict):
+    async def run(self, ctx: BotContext, args: list, flags: dict):
         p = CommandParser(self.command)
-
         pipeline = p.parse()
 
         # Executa uma PIPELINE para executar este comando interpretado,
@@ -227,14 +259,14 @@ class InterpretedCommand(BotCommand):
         # apontam para os args e flags originais recebidos pelo comando interpretado.
         return await self.bot.handle_pipeline_execution(
             self.bot.commands,
-            ctx, 
-            pipeline, 
-            activator_args=args, 
+            ctx,
+            pipeline,
+            activator_args=args,
             activator_flags=flags
         )
 
 class CommandAlias:
-    def __init__(self, origin: BotCommand):
+    def __init__(self, origin: Command):
         self.origin = origin
 
 class ModuleHook:
@@ -263,7 +295,6 @@ class ModuleHook:
 
     def get_guild_settings_manager(self):
         assert self.bot.guildsettings
-
         return self.bot.guildsettings
 
     def run(self):
@@ -289,6 +320,9 @@ class TimeoutContext:
             if self.callback:
                 await self.callback(self, self.kwargs)
         except Exception as e:
+            # @TODO:
+            # Não faço ideia do porque eu fiz isso...
+            # ver outra forma de deixar explícito que aconteceu uma Exception
             self.caught_exception = e
         finally:
             self.running_task = None
@@ -298,7 +332,6 @@ class TimeoutContext:
 
         self.caught_exception = None
         self.running_task = asyncio.get_running_loop().create_task(self.run())
-
 
 class IntervalContext(TimeoutContext):
     def __init__(self, waitfor: int, callable: callable, max_count: int=0, callback: callable=None, ignore_exception: bool=False, **kwargs):
@@ -327,6 +360,9 @@ class IntervalContext(TimeoutContext):
                     time_delta = time.time() - time_start
                     await asyncio.sleep(self.waitfor - time_delta)    
         except Exception as e:
+            # @TODO:
+            # Não faço ideia do porque eu fiz isso...
+            # ver outra forma de deixar explícito que aconteceu uma Exception
             self.caught_exception = e
         finally:
             self.running_task = None
@@ -440,6 +476,9 @@ class CommandsManager:
         cmds = list()
         
         for value in self.commands.values():
+            # Se for um apelido, não mostre
+            # Agora, se for um CliCommand, nem verifique se ele é hidden, pois não existe CliCommand hidden no nosso caso.
+            # Agora se não for nenhum das verificações acima, verifique se hidden é False
             if not isinstance(value, CommandAlias) and (is_instance(value, CliCommand) or show_hidden or not value.hidden):
                 cmds.append(value)
 
@@ -461,6 +500,7 @@ class HooksManager:
         hook.destroy()
 
     def clear(self):
+        # Reversed, pois estamos excluindo enquanto estamos iterando
         for hook in reversed(self.hooks):
             self.unregister_hook(hook)
 
@@ -532,35 +572,16 @@ class Bot:
             self.commands.clear()
             self.hooks.clear()
 
-            for reload_notification_target in (self.connection_manager, ):
-                if reload_notification_target:
-                    reload_notification_target.notify_reload()
+            # Notifica todos os componentes que precisam, que está acontecendo um reload
+            self.notify_internal_reload()
 
         # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
         self.load_modules(f'{self.curr_path}/modules', force_reload=True)
-        # Carrega os comandos interpretados definidos na chave específicada.
-        self.load_interpreted_commands('interpreted_commands')
-
-    async def get_database_connection(self):
-        if not self.active_database:
-            self.active_database = databases.Database(
-                self.config.get('database.connection_string')
-            )
-
-        if not self.active_database.is_connected:
-            try:
-                await self.active_database.connect()
-            except Exception as e:
-                logging.error(f'Connecting to the database failed: {e}')
-
-                raise DatabaseError('Não foi possível conectar-se à base de dados.')
-        
-        return self.active_database
 
     def load_modules(self, dirpath: str, force_reload: bool=False):
         with os.scandir(dirpath) as iterator:
             for file in iterator:
-                if file.name.endswith('.py') and file.is_file():
+                if file.is_file() and file.name.endswith('.py'):
                     module_str = f"{dirpath[len(os.path.dirname(dirpath)) + 1:].replace('/', '.')}.{file.name[:-3]}"
                     # Isso pode falhar, caso falhe, apenas avise o log e ignore o modulo.
                     try:
@@ -600,6 +621,52 @@ class Bot:
                 self.hooks.register_hook(cmd)
                 logging.info(f"Successfully loaded a new Bot Hook: {mod.__name__}.{type(cmd).__name__} ({cmd})")
 
+    async def reload_all_modules(self):
+        logging.info(f"Reloading configuration file and all modules...")
+
+        self.config.load()
+        self.load_all_modules(True)
+
+    def notify_internal_reload(self):
+        # Caso tenhamos objetos que precisam verificar algo após um reload, como é o caso do nosso ConnectionManager
+        # notifique os mesmos...
+        for notification_target in (self.connection_manager, ):
+            if notification_target:
+                assert isinstance(notification_target, INotifiable)
+                notification_target.notify_reload()
+
+    def notify_internal_shutdown(self):
+        for notification_target in (self.connection_manager, ):
+            if notification_target:
+                assert isinstance(notification_target, INotifiable)
+                notification_target.notify_shutdown()
+
+    def listen(self):
+        self.client.listen(self.config.get('global.token'))
+
+    async def stop(self):
+        # Avisa todos os componentes que precisam ser notificados que o bot está desligando..
+        # Por enquanto, o método é SYNC.
+        self.notify_internal_shutdown()
+
+        await self.client.close()
+
+    async def get_database_connection(self):
+        if not self.active_database:
+            self.active_database = databases.Database(
+                self.config.get('database.connection_string')
+            )
+
+        if not self.active_database.is_connected:
+            try:
+                await self.active_database.connect()
+            except Exception as e:
+                logging.error(f'Connecting to the database failed: {e}')
+
+                raise DatabaseError('Não foi possível conectar-se à base de dados.')
+        
+        return self.active_database
+
     def add_interpreted_command(self, command: InterpretedCommand):
         logging.info(f"Adding interpreted command: {command.name} ({command})")
 
@@ -626,44 +693,12 @@ class Bot:
         else:
             raise BotError(f'O comando {name} não existe.')
 
-    def load_interpreted_commands(self, keystr: str):
-        for command in self.config.get(keystr, []):
-            self.add_interpreted_command(
-                InterpretedCommand(
-                    self,
-                    command['name'],
-                    command['value']
-                )
-            )
-
-    async def reload_all_modules(self):
-        logging.info(f"Reloading configuration file and all modules...")
-
-        # @TODO: Verificar se isso aqui é seguro mostrar para o usuário.
-        # Se isso falhar, voltará o Exception para o HotReload
-        self.config.load()
-
-        self.load_all_modules(True)
-
-    def listen(self):
-        self.client.listen(self.config.get('global.token'))
-
-    def create_response_embed(self, ctx: Context):
-        assert ctx.author
-
-        return discord.Embed( 
-            color=discord.Color.magenta()
-        ).set_footer(
-            text=ctx.author.name, 
-            icon_url=ctx.author.avatar_url_as(size=32)
-        )
-
-    def has_permission_level(self, permissionlevel: PermissionLevel, ctx: Context):
+    def has_permission_level(self, permissionlevel: PermissionLevel, ctx: BotContext):
         return self.rate_author_permission_level(ctx).value >= permissionlevel.value
 
-    def rate_author_permission_level(self, ctx: Context):
+    def rate_author_permission_level(self, ctx: BotContext):
         assert ctx.author
-        assert ctx.guild
+        assert ctx.channel
 
         permlevel = PermissionLevel.NONE
 
@@ -676,13 +711,13 @@ class Bot:
                 permlevel = PermissionLevel.GUILD_MOD
             if permissions.administrator:
                 permlevel = PermissionLevel.GUILD_ADMIN
-            if ctx.guild.owner == ctx.author:
+            if ctx.channel.guild.owner == ctx.author:
                 permlevel = PermissionLevel.GUILD_OWNER
 
         return permlevel
 
-    def extract_mentions_from(self, args: list, flags: dict, ctx: Context):
-        assert ctx.guild
+    def extract_mentions_from(self, args: list, flags: dict, ctx: BotContext):
+        assert ctx.channel
 
         flags['mentions'] = []
         flags['channel_mentions'] = []
@@ -691,7 +726,6 @@ class Bot:
         for arg in args:
             # Padrão das mentions do Discord podem ser encontradas aqui:
             # https://discordapp.com/developers/docs/reference#message-formatting
-
             if re.findall('^<(@[!&]?|#)[0-9]+>$', arg):
                 try:
                     num = int(re.findall('[0-9]+', arg)[0])
@@ -703,14 +737,14 @@ class Bot:
                 if arg[1] == '@':
                     if arg[2] == '&':
                         dest_list = flags['role_mentions']
-                        found = ctx.guild.get_role(num)
+                        found = ctx.channel.guild.get_role(num)
                     else:
                         # Usuario e Usuario (Apelido)
                         dest_list = flags['mentions']
-                        found = ctx.guild.get_member(num)
+                        found = ctx.channel.guild.get_member(num)
                 elif arg[1] == '#':
                     dest_list = flags['channel_mentions']
-                    found = ctx.guild.get_channel(num)
+                    found = ctx.channel.guild.get_channel(num)
 
                 if found:
                     dest_list.append(found)
@@ -718,33 +752,36 @@ class Bot:
                     raise BotError(f'O objeto `{num}` mencionado não foi encontrado na Guild atual.')
 
     async def set_playing_game(self, playingstr: str, status=discord.Status, afk: bool=False):
-        await self.client.change_presence(activity=discord.Game(playingstr), status=status, afk=afk)
+        return await self.client.change_presence(
+            activity=discord.Game(playingstr), 
+            status=status, 
+            afk=afk
+        )
 
-    async def get_bot_prefix(self, ctx: Context):
-        assert ctx.guild
+    async def get_bot_prefix(self, ctx: BotContext):
+        assert ctx.channel
 
         gsm = self.guildsettings
         var = None
 
         try:
-            var = await gsm.get_guild_variable(ctx.guild.id, 'bot_prefix')
+            var = await gsm.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
         except DatabaseError:
             pass
 
         if var and var.get_value():
             return var.get_value()
             
-        return self.config.get('global.prefix', ';;')
+        return self.config.get('global.prefix', ';')
 
     async def reset_bot_prefix(self, ctx: Context):
-        assert ctx.guild
+        assert ctx.channel
 
         if not self.has_permission_level(PermissionLevel.GUILD_MOD, ctx):
             raise PermissionLevelError(f'Você não possui um nível de permissão igual ou superior à `{PermissionLevel.GUILD_MOD.name}`  para poder realizar esta ação.')
 
         gsm = self.guildsettings
-
-        var = await gsm.get_guild_variable(ctx.guild.id, 'bot_prefix')
+        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
         
         if var:
             return await gsm.remove_guild_variable(var)
@@ -753,13 +790,12 @@ class Bot:
 
     async def receive_ready(self, kwargs):
         logging.info(f"Successfully logged in")
-
-        if self.connection_manager and not self.connection_manager.server_is_open():
+        if self.connection_manager and not self.connection_manager.is_accepting_connections():
             await self.connection_manager.start()
 
         if self.playing_interval is None:
             self.playing_interval = IntervalContext(
-                self.config.get('global.playing_delay', 60),
+                self.config.get('global.playing_delay', 120),
                 self.callable_update_playing,
                 ignore_exception=True
             )
@@ -777,7 +813,6 @@ class Bot:
         ctx = BotContext(
             self,
             message.channel,
-            message.guild,
             message.author,
             message
         )
@@ -859,6 +894,8 @@ class Bot:
 
                             # Se encontrarmos um pedaço que seja uma lista, temos uma outra PIPELINE, execute ela recursivamente antes para termos o resultado como uma string.
                             if isinstance(chunk, list):
+                                # @NOTE:
+                                # A execução dessa PIPELINE é dentro de uma string, ou seja, PRECISA RETORNAR UMA LISTA DE STRINGS OU UMA STRING.
                                 arg[i] = await self.handle_pipeline_execution(target_commands, ctx, chunk, activator_args=activator_args, activator_flags=activator_flags)
 
                                 # Recebemos uma string ou lista de strings?
@@ -872,8 +909,8 @@ class Bot:
                         args[c] = ''.join(arg)
 
                 # Se estamos prestes a passar uma saída de outro comando na PIPELINE para este atual, precisa ser um tipo válido.
-                if not isinstance(pipeline_output, str) and not isinstance(pipeline_output, list):
-                    raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
+                # if not isinstance(pipeline_output, str) and not isinstance(pipeline_output, list):
+                #    raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
                 
                 # Continue o processamento da PIPELINE.
                 pipeline_output = await self.handle_command_execution(
@@ -921,8 +958,8 @@ class Bot:
                 flags['activator_flags'] = activator_flags
 
             try:
-                output = await command.run(
-                    ctx, 
+                output = await command.run_wrapper(
+                    ctx,
                     args, 
                     flags
                 )
@@ -1002,24 +1039,36 @@ class CliConnection:
         self.bot_context = bot_context
 
     async def read_data(self):
-        return await self.reader.readline()
+        if not self.writer.is_closing():
+            return await self.reader.readline()
 
     async def write_packet(self, packet: dict):
-        logging.info(f'write_packet: Sending packet {packet} to {self.peername}')
+        if not self.writer.is_closing():
+            logging.info(f'write_packet: Sending packet {packet} to {self.peername}')
 
-        self.writer.write(
-            (json.dumps(packet) + '\n').encode('utf-8')
-        )
+            self.writer.write(
+                (json.dumps(packet) + '\n').encode('utf-8')
+            )
 
-        await self.writer.drain()
+            await self.writer.drain()
 
-    def write_eof(self):
-        self.writer.write_eof()
+    async def wait_closed(self):
+        await self.writer.wait_closed()
+
+    def close(self):
+        assert self.writer.can_write_eof()
+
+        if not self.writer.is_closing():
+            self.writer.write_eof()
+            self.writer.close()
+
+    def is_closing(self):
+        return self.writer.is_closing()
 
     def at_eof(self):
         return self.reader.at_eof()
 
-class ConnectionManager:
+class ConnectionManager(INotifiable):
     def __init__(self, bot, listen: str, port: int):
         self.bot = bot
         self.host = listen
@@ -1035,13 +1084,22 @@ class ConnectionManager:
         self.active_connections = []
 
     def notify_reload(self):
-        assert self.bot_hook
-        self.bot_hook = None
-        
-        # O bot recebeu um reload, portato, nosso hook de mensagens caiu!
-        self.hook_required_events()
+        if self.is_accepting_connections:
+            assert self.bot_hook
+            self.bot_hook = None
+            
+            # O bot recebeu um reload, portato, nosso hook de mensagens caiu!
+            self.hook_required_events()
 
-    def server_is_open(self):
+    def notify_shutdown(self):
+        if self.is_accepting_connections:
+            self.close_all_active_connections()
+
+    def close_all_active_connections(self):
+        for conn in self.active_connections:
+            conn.close()
+
+    def is_accepting_connections(self):
         return self.open_server != None
 
     def hook_required_events(self):
@@ -1064,12 +1122,16 @@ class ConnectionManager:
     async def start(self):
         assert not self.open_server
 
-        self.open_server = await asyncio.start_server(
-            self.callable_receive_connection,
-            self.host,
-            self.port,
-            start_serving=True
-        )
+        try:
+            self.open_server = await asyncio.start_server(
+                self.callable_receive_connection,
+                self.host,
+                self.port,
+                start_serving=True
+            )
+        except Exception:
+            logging.info(f'ConnectionManager could not start server, aborting...')
+            return
 
         self.hook_required_events()
 
@@ -1092,7 +1154,7 @@ class ConnectionManager:
         self.active_connections.append(cliconn)
 
         data = await cliconn.read_data()
-        while data and not cliconn.at_eof():
+        while data and not (cliconn.at_eof() or cliconn.is_closing()):
             json_packet = None
 
             try:
@@ -1108,7 +1170,10 @@ class ConnectionManager:
 
             data = await cliconn.read_data()
 
-        writer.write_eof()
+        if not cliconn.is_closing():
+            cliconn.close()
+        else:
+            await cliconn.wait_closed()
 
         self.active_connections.remove(cliconn)
 
@@ -1153,7 +1218,7 @@ class ConnectionManager:
 
         return {
             "type": "command_response",
-            "data": current_context.output_stream.getvalue()
+            "data": current_context.extract_output_data()
         }
 
 class GuildSettingsManager:
@@ -1254,7 +1319,7 @@ class GuildSettingsManager:
         return ok
 
 class Slider:
-    def __init__(self, bot: Bot, ctx: Context, items: list, reaction_right: str=r'▶️', reaction_left: str=r'◀️', restricted: bool=False, startat: int=0, timeout: int=60):
+    def __init__(self, bot: Bot, ctx: BotContext, items: list, reaction_right: str=r'▶️', reaction_left: str=r'◀️', restricted: bool=False, startat: int=0, timeout: int=60):
         assert items
         
         self.bot = bot
@@ -1357,3 +1422,4 @@ class Slider:
                     "reaction_add", 
                     self.registered_event_id
                 )
+                

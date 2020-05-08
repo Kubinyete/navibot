@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from navibot.client import CliCommand
 from navibot.errors import CommandError
@@ -40,6 +41,21 @@ class CReload(CliCommand):
         except Exception as e:
             raise CommandError(f'Ocorreu um erro ao tentar realizar o reload:\n\n{type(e).__name__}: {e}')
 
+class CShutdown(CliCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = 'shutdown',
+            aliases = ['sd']
+        )
+
+    async def run(self, ctx, args, flags):
+        asyncio.create_task(
+            self.bot.stop()
+        )
+
+        return 'Desligando...'
+
 class CSetContext(CliCommand):
     def __init__(self, bot):
         super().__init__(
@@ -68,18 +84,14 @@ class CSetContext(CliCommand):
             if not target:
                 raise CommandError(f'O usuário {target_id} não foi encontrado.')
             else:
-                ctx.update_bot_context(
-                    target
-                )
+                ctx.update_botcontext_target(target)
         elif 'c' in flags or 'channel' in flags:
             target = self.bot.client.get_channel(target_id)
 
             if not target:
                 raise CommandError(f'O canal {target_id} não foi encontrado.')
             else:
-                ctx.update_bot_context(
-                    target
-                )
+                ctx.update_botcontext_target(target)
         else:
             return self.get_usage_text()
 

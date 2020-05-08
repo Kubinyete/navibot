@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from navibot.client import BotCommand, ModuleHook, Context, ReactionType, PermissionLevel
+from navibot.client import BotCommand, ModuleHook, BotContext, ReactionType, PermissionLevel
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
 
@@ -12,12 +12,12 @@ class CNsfw(BotCommand):
             name = 'nsfw',
             description = "Ativa ou desativa o conteúdo NSFW para esta Guild.",
             usage = "[-e|--enable] [-d|--disable]",
-            permissionlevel=PermissionLevel.GUILD_MOD
+            permissionlevel=PermissionLevel.GUILD_ADMIN
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(message.guild.id, 'nsfw_disabled')
+        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'nsfw_disabled')
 
         if var:
             if 'enable' in flags or 'e' in flags: 
@@ -48,19 +48,17 @@ class CSetWelcomeChannel(BotCommand):
             permissionlevel=PermissionLevel.GUILD_MOD
         )
 
-    async def run(self, message, args, flags):
-        assert message.guild
-
+    async def run(self, ctx, args, flags):
         channel = flags.get('channel_mentions', None)
         
         if channel:
             channel = channel[0]
 
         if not channel and (not 'disable' in flags and not 'd' in flags): 
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(message.guild.id, 'gst_welcome_channel_id')
+        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'gst_welcome_channel_id')
 
         if var:
             if 'disable' in flags or 'd' in flags:
@@ -89,14 +87,12 @@ class CSetWelcomeMessage(BotCommand):
             permissionlevel=PermissionLevel.GUILD_MOD
         )
 
-    async def run(self, message, args, flags):
-        assert message.guild
-
+    async def run(self, ctx, args, flags):
         if not args: 
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(message.guild.id, 'gst_welcome_channel_message')
+        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'gst_welcome_channel_message')
 
         if var:
             cmd = ' '.join(args)
@@ -120,15 +116,14 @@ class CSimulateMemberJoin(BotCommand):
             bot,
             name = "simulatememberjoin",
             description = "Simula um evento on_member_join na Guild atual, utilizando o autor deste comando como parâmetro.",
-            permissionlevel = PermissionLevel.GUILD_MOD
+            permissionlevel = PermissionLevel.GUILD_MOD,
+            hidden = True
         )
 
-    async def run(self, message, args, flags):
-        assert message.author
-
+    async def run(self, ctx, args, flags):
         await self.bot.client.dispatch_event(
             'member_join',
-            member=message.author
+            member=ctx.author
         )
         
 class CSetPrefix(BotCommand):
@@ -138,15 +133,15 @@ class CSetPrefix(BotCommand):
             name = 'setprefix',
             description = "Altera o prefixo de ativação do bot no contexto da Guild atual.",
             usage = "prefixo [-r|--reset]",
-            permissionlevel=PermissionLevel.GUILD_MOD
+            permissionlevel=PermissionLevel.GUILD_ADMIN
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args or len(args[0]) < 1:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(message.guild.id, 'bot_prefix')
+        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
 
         if var:
             var.set_value(args[0])
@@ -168,10 +163,6 @@ class HWelcomeMessage(ModuleHook):
         member = kwargs.get('member')
 
         gsm = self.get_guild_settings_manager()
-        await self.bot.get_database_connection()
-
-        # vc = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id')
-        # vm = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
 
         vc, vm = await asyncio.gather(
             gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
@@ -183,10 +174,9 @@ class HWelcomeMessage(ModuleHook):
 
             if channel:
                 await self.bot.handle_command_parse(
-                    Context(
+                    BotContext(
                         self.bot,
                         channel,
-                        member.guild,
                         member
                     ),
                     vm.get_value()

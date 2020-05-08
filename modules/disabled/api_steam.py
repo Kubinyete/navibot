@@ -19,9 +19,9 @@ class CSteam(BotCommand):
             self.bot.config.get('modules.steam.key')
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         ident = args[0]
 
@@ -63,7 +63,7 @@ class CSteam(BotCommand):
 
             items = []
 
-            embed = self.create_response_embed(message)
+            embed = ctx.create_response_embed()
             embed.title = player['personaname']
             embed.url = player['profileurl']
             embed.set_thumbnail(url=player['avatarfull'])
@@ -85,6 +85,6 @@ class CSteam(BotCommand):
 
             return Slider(
                 self.bot,
-                message,
+                ctx,
                 items
             )

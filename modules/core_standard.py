@@ -21,7 +21,7 @@ class CHelp(BotCommand):
 
         self.commands_per_page = 30
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         text = "**Navibot** é um bot **experimental** escrito utilizando a biblioteca [discord.py](https://github.com/Rapptz/discord.py) por razões de aprendizado, mais específicamente para experimentar com o asyncio e também conseguir construir e replicar algumas funcionalidades que já vi serem implementadas."
         text += f"\n\n:information_source: Digite `help [comando]` para obter mais informações."
         text += f"\n\n**Comandos disponíveis**:\n\n"
@@ -31,11 +31,11 @@ class CHelp(BotCommand):
             target = self.bot.commands.get_command_by_name(target)
 
             if target:
-                return target.get_usage_embed(message)
+                return target.get_usage_embed(ctx)
             else:
                 raise CommandError(f"O comando `{args[0]}` não existe.")
 
-        embeds = [self.create_response_embed(message)]
+        embeds = [ctx.create_response_embed()]
         curr = embeds[0]
 
         i = 1
@@ -46,7 +46,7 @@ class CHelp(BotCommand):
 
                 text = ''
 
-                curr = self.create_response_embed(message)
+                curr = ctx.create_response_embed()
                 embeds.append(curr)
 
             typestr = type(value).__name__
@@ -61,7 +61,7 @@ class CHelp(BotCommand):
 
         return Slider(
             self.bot,
-            message,
+            ctx,
             embeds,
             restricted=True
         )
@@ -76,23 +76,22 @@ class CAvatar(BotCommand):
             usage = "[@Usuario] [--self] [--guild] [--url] [--size=256]"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         target = None
 
         if 'self' in flags:
-            assert message.author
-
-            target = message.author
+            target = ctx.author
         elif 'guild' in flags:
-            assert message.guild
+            if not ctx.channel:
+                raise CommandError('É preciso que o contexto atual tenha como origem um canal para poder utilizar a flag `guild`.')
 
-            target = message.guild
+            target = ctx.channel.guild
         else:
             mentions = flags['mentions']
             target = mentions[0] if mentions else None
         
         if not target:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         try:
             size = int(flags.get('size', 256))
@@ -109,12 +108,14 @@ class CAvatar(BotCommand):
         if "url" in flags:
             return icon_url
         
-        out = self.create_response_embed(message) 
+        out = ctx.create_response_embed() 
         out.set_image(url=icon_url)
             
         if is_instance(target, discord.User):
             out.title = f"Avatar de {target.name}"
-        
+        else:
+            out.title = f'Ícone da Guild: {target.name}'
+
         return out
 
 class CRemind(BotCommand):
@@ -130,10 +131,8 @@ class CRemind(BotCommand):
 
         self.limit = 3
 
-    async def run(self, message, args, flags):
-        assert message.author
-
-        stored = self.get_user_storage(message.author)
+    async def run(self, ctx, args, flags):
+        stored = self.get_user_storage(ctx.author)
 
         if 'list' in flags:
             if stored:
@@ -175,7 +174,7 @@ class CRemind(BotCommand):
             return f':information_source: Total de {i} tarefa(s) cancelada(s).'
         else:
             if not 'time' in flags:
-                return self.get_usage_embed(message)
+                return self.get_usage_embed(ctx)
 
             text = ' '.join(args) if args else ''
 
@@ -189,7 +188,7 @@ class CRemind(BotCommand):
                     seconds, 
                     self.callable_send_reminder, 
                     callback=self.callable_free_reminder, 
-                    ctx=message, 
+                    ctx=ctx, 
                     text=text if text else f"Lembrete sem título",
                     timestamp=time.time()
                 )
@@ -228,13 +227,13 @@ class CSpotify(BotCommand):
             usage = "@Usuario"
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         mentions = flags['mentions']
 
         target = mentions[0] if mentions else None
 
         if not target:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
         spotify = None
 
@@ -243,7 +242,7 @@ class CSpotify(BotCommand):
                 spotify = act
 
         if spotify:
-            out = self.create_response_embed(message) 
+            out = ctx.create_response_embed() 
             out.title = f"{target.name} está ouvindo"
             out.add_field(name='Título', value=spotify.title, inline=True)
             out.add_field(name='Artista(s)', value=', '.join(spotify.artists), inline=True)
@@ -265,11 +264,11 @@ class CEmbed(BotCommand):
             usage = '[-t "titulo"] [-d "descricao"] [-img "url"] [-timg "url"] [-url "url"]'
         )
 
-    async def run(self, message, args, flags):
+    async def run(self, ctx, args, flags):
         if not args or not flags:
-            return self.get_usage_embed(message)
+            return self.get_usage_embed(ctx)
 
-        embed = self.create_response_embed(message)
+        embed = ctx.create_response_embed()
         index = 0
 
         for key in flags.keys():
@@ -292,3 +291,24 @@ class CEmbed(BotCommand):
                 break
 
         return embed
+
+class CGithub(InterpretedCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            'say https://github.com/Kubinyete/navibot',
+            name = "github",
+            aliases = ['repo'],
+            description = "Retorna o link para o repositório do bot."
+        )
+
+class CCoinflip(InterpretedCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            'embed -t "{getmember --self --name} acabou de jogar a moeda para o alto!" -timg "https://cdn140.picsart.com/272800024023211.png?type=webp&to=min&r=256" -d "O resultado é *{choice cara coroa}*."',
+            name = "coinflip",
+            aliases = ['flip'],
+            description = "Joga uma moeda para o alto e retorna um resultado entre cara ou coroa."
+        )
+
