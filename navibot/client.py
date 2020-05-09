@@ -164,6 +164,7 @@ class Command:
         self.description = 'Descrição não disponível.'
         self.usage = ''
         self.aliases = []
+        self.supported_args_type = (str, )
 
     def get_usage_text(self):
         return f"{self.description}\n\n`{self.name} {self.usage}`"
@@ -181,16 +182,28 @@ class Command:
     async def run(self, args: list, flags: dict):
         raise NotImplementedError()
 
+    # Wrapper para poder receber qualquer tipo de argumento e verificar
+    # se o comando suporta aquele tipo de entrada.
+    async def run_wrapper(self, ctx: Context, args, flags: dict):
+        for arg in args:
+            if not type(arg) in self.supported_args_type:
+                raise CommandError(f'O comando `{self.name}` não recebeu um tipo de dados esperado como argumento...\n\nEsperado: `{self.supported_args_type}`\nObtido: `{type(arg)}`')
+
+        return await self.run(
+            ctx,
+            args,
+            flags
+        )
+
 class BotCommand(Command):
     # @TODO:
     # Parar de usar enable_usermap, pensar em uma outra forma de possuir uma "memória volátil"
     # para os comandos usarem dependendo do contexto
-    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False, enable_usermap: bool=False, supported_args_type: tuple=(str, ), **kwargs):
+    def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False, enable_usermap: bool=False, **kwargs):
         super().__init__(bot)
 
         self.permissionlevel = permissionlevel
         self.hidden = hidden
-        self.supported_args_type = supported_args_type
 
         self.enable_usermap = enable_usermap        
         self.usermap = dict() if enable_usermap else None
@@ -218,19 +231,6 @@ class BotCommand(Command):
 
     async def run(self, ctx: BotContext, args: list, flags: dict):
         raise NotImplementedError()
-
-    # Wrapper para poder receber qualquer tipo de argumento e verificar
-    # se o comando suporta aquele tipo de entrada.
-    async def run_wrapper(self, ctx: BotContext, args, flags: dict):
-        for arg in args:
-            if not type(arg) in self.supported_args_type:
-                raise CommandError(f'O comando `{self.name}` não recebeu um tipo de dados esperado como argumento...\n\nEsperado: `{self.supported_args_type}`\nObtido: `{type(arg)}`')
-
-        return await self.run(
-            ctx,
-            args,
-            flags
-        )
 
 class CliCommand(Command):
     def __init__(self, bot, **kwargs):
