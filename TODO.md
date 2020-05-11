@@ -19,7 +19,6 @@
     - [X] O bot deve dizer o URL do github e deixar com que o próprio cliente resolva o embed (desativar comportamento automatico do BotContext.reply() de enviar somente embeds)
 
 - [X] coinflip (interpretado) (2020-05-05 23:23:16)
-- [ ] regexp
 - [ ] scared (interpretado)
 - [ ] hug @Usuario
     - [ ] Verificar se tem como fazer uma verificação de menções antes de executar o comando interpretado (pode falhar pois não verificamos argumentos antes)

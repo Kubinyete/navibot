@@ -1084,7 +1084,7 @@ class ConnectionManager(INotifiable):
         self.active_connections = []
 
     def notify_reload(self):
-        if self.is_accepting_connections():
+        if self.is_accepting_connections:
             assert self.bot_hook
             self.bot_hook = None
             
@@ -1092,7 +1092,7 @@ class ConnectionManager(INotifiable):
             self.hook_required_events()
 
     def notify_shutdown(self):
-        if self.is_accepting_connections():
+        if self.is_accepting_connections:
             self.close_all_active_connections()
 
     def close_all_active_connections(self):
@@ -1172,8 +1172,8 @@ class ConnectionManager(INotifiable):
 
         if not cliconn.is_closing():
             cliconn.close()
-
-        await cliconn.wait_closed()
+        else:
+            await cliconn.wait_closed()
 
         self.active_connections.remove(cliconn)
 
