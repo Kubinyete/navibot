@@ -5,6 +5,9 @@ import datetime
 import math
 import discord
 import random
+import io
+import PIL.Image
+import aiohttp
 
 from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType, Slider
 from navibot.errors import CommandError
@@ -353,3 +356,140 @@ class CPat(BotCommand):
         embed.set_image(url=random.choice(self.image_list))
         
         return embed
+
+class CTriggered(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "triggered",
+            aliases = ['trig'],
+            description = "T R I G G E R E D.",
+            usage = '[URL] [@Usuario]'
+        )
+
+        self.triggered_image = PIL.Image.open(
+            f'{self.bot.curr_path}/repo/std/triggered.png'
+        )
+
+        self.max_image_size = 256
+        self.red_factor = 3
+        self.suppress_factor = 0.5
+
+    async def run(self, ctx, args, flags):
+        mentions = flags.get('mentions', None)
+        
+        url = None
+        bytes = None
+
+        if not mentions:
+            if args:
+                url = args[0]
+            else:
+                # @TODO:
+                # Obter a ultima imagem enviada no canal atual dentro de Context
+                # Usar algum auxilio de BotContext ou BotCommand para que seja algo
+                # normalizado na nossa estrutura de comandos
+                return self.get_usage_embed(ctx)
+        else:
+            url = str(mentions[0].avatar_url_as(size=self.max_image_size))
+
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as sess:
+                async with sess.get(url) as resp:
+                    if resp.status == 200:
+                        bytes = await resp.read()
+                    else:
+                        raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
+        except aiohttp.ClientError as e:
+            logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
+            raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
+        except asyncio.TimeoutError:
+            logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
+            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.")
+
+        bio_input = io.BytesIO(bytes)
+        bio_output = io.BytesIO()
+
+        def callable_apply_triggered_effect():
+            curr_img = None
+
+            try:
+                curr_img = PIL.Image.open(bio_input)
+            except Exception:
+                raise CommandError('Não foi possível abrir a imagem a partir dos dados recebidos.')
+
+            if not curr_img.format in ('PNG', 'JPG', 'JPEG', 'GIF', 'WEBP'):
+                raise CommandError('O formato da imagem é inválido.')
+
+            curr_img = curr_img.convert(mode='RGB')
+            trigered_image_copy = self.triggered_image.copy()
+
+            # @NOTE
+            # Diminuindo o tamanho da imagem de entrada, evitando imagens gigantes
+            if curr_img.width > self.max_image_size or curr_img.height > self.max_image_size:
+                fw = curr_img.width
+                fh = curr_img.height
+
+                while fw > self.max_image_size or fh > self.max_image_size:
+                    wfactor = self.max_image_size / fw 
+                    hfactor = self.max_image_size / fh
+
+                    if wfactor < 1:
+                        fw *= wfactor
+                        fh *= wfactor
+                    elif hfactor < 1:
+                        fw *= hfactor
+                        fh *= hfactor
+                
+                curr_img = curr_img.resize((
+                    math.floor(fw),
+                    math.floor(fh)
+                ))
+
+            # @NOTE:
+            # 1. Redimensionar trigered_image_copy para que tenha a mesma largura que curr_img
+            # 2. Aplicar filtro "vermelho" sobre curr_img
+            # 3. Aplicar trigered_image_copy sobre curr_img, alinhando ao canto inferior
+
+            # Deixa a imagem vermelha
+            # @PERFORMANCE:
+            # LENTOOOOOOOOOOOOOO!
+            # Por isso estamos executando dentro do run_in_executor
+            pixel = curr_img.load()
+            for x in range(curr_img.width):
+                for y in range(curr_img.height):
+                    # RGB
+                    p = pixel[(x, y)]
+
+                    v1 = math.floor(p[0] * self.red_factor)
+                    v2 = math.floor(p[1] * self.suppress_factor)
+                    v3 = math.floor(p[0] * self.suppress_factor)
+                    
+                    v1 = 255 if v1 > 255 else v1
+                    # v2 = 255 if v2 > 255 else v2
+                    # v3 = 255 if v3 > 255 else v3
+
+                    pixel[(x, y)] = (v1, v2, v3)
+
+            factor = curr_img.width / trigered_image_copy.width
+
+            trigered_image_copy = trigered_image_copy.resize((
+                math.floor(trigered_image_copy.width * factor),
+                math.floor(trigered_image_copy.height * factor)
+            ))
+
+            curr_img.paste(trigered_image_copy, box=(0, curr_img.height - trigered_image_copy.height))
+            curr_img.save(bio_output, format='JPEG')
+
+        await asyncio.get_running_loop().run_in_executor(
+            None,
+            callable_apply_triggered_effect
+        )
+
+        # @NOTE:
+        # discord.py: se não voltarmos o ponteiro, não lemos nada
+        bio_output.seek(0, io.SEEK_SET)
+        return discord.File(
+            bio_output,
+            filename='triggered.jpeg'
+        )

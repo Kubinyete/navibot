@@ -93,6 +93,9 @@ class BotContext(Context):
         elif isinstance(response, discord.Embed):
             return await target.send(embed=response)
 
+        elif is_instance(response, discord.File):
+            return await target.send(file=response)
+
         elif isinstance(response, Slider):
             return await response.send()
 

@@ -23,9 +23,9 @@
 - [X] base64 (2020-05-12 01:11:08) encode/decode
 - [X] md5 (2020-05-12 01:26:55) hexdigest
 - [X] pat @Usuario
+- [X] triggered [@Usuario] [URL] (2020-05-12 14:34:10)
 - [ ] hug @Usuario
 - [ ] scared (interpretado)
-- [ ] triggered [@Usuario] [URL] [discord_attachment]
 - [ ] think [@Usuario] [URL] [discord_attachment]
 - [ ] text2image [texto...]
 - [ ] asciify [@Usuario] [URL] [discord_attachment]
