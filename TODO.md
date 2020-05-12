@@ -19,12 +19,12 @@
     - [X] O bot deve dizer o URL do github e deixar com que o próprio cliente resolva o embed (desativar comportamento automatico do BotContext.reply() de enviar somente embeds)
 
 - [X] coinflip (interpretado) (2020-05-05 23:23:16)
-- [ ] scared (interpretado)
+- [X] regexp (2020-05-12 01:06:51) findall
+- [X] base64 (2020-05-12 01:11:08) encode/decode
+- [X] md5 (2020-05-12 01:26:55) hexdigest
+- [X] pat @Usuario
 - [ ] hug @Usuario
-    - [ ] Verificar se tem como fazer uma verificação de menções antes de executar o comando interpretado (pode falhar pois não verificamos argumentos antes)
-- [ ] pat @Usuario
-    - [ ] Verificar se tem como fazer uma verificação de menções antes de executar o comando interpretado (pode falhar pois não verificamos argumentos antes)
-- [ ] encode [md5|base64|...]
+- [ ] scared (interpretado)
 - [ ] triggered [@Usuario] [URL] [discord_attachment]
 - [ ] think [@Usuario] [URL] [discord_attachment]
 - [ ] text2image [texto...]

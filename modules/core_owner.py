@@ -28,7 +28,7 @@ class CSetAvatar(BotCommand):
         avatar_bytes = None
 
         try:
-            with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as sess:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as sess:
                 async with sess.get(avatar_url) as resp:
                     if resp.status == 200:
                         avatar_bytes = await resp.read()

@@ -1,3 +1,6 @@
+import re
+import base64
+import hashlib
 import logging
 
 from datetime import datetime
@@ -306,8 +309,7 @@ class CLen(BotCommand):
             bot,
             name = "len",
             aliases = ['le'],
-            description = "Retorna a soma do tamanho de todos os argumentos recebidos.",
-            hidden = True
+            description = "Retorna a soma do tamanho de todos os argumentos recebidos."
         )
 
     async def run(self, ctx, args, flags):
@@ -347,3 +349,61 @@ class CSubstr(BotCommand):
             return joined_args[st:en] if en != None else joined_args[st:]
         except IndexError:
             raise CommandError('O alcance de índices informados não são válidos (start={st}, end={en}).')
+
+class CRegexp(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "regexp",
+            aliases = ['rexp'],
+            description = "Aplica a expressão regular informada por argumento dado uma string de argumento.",
+            usage = 'expr [texto...]'        )
+
+    async def run(self, ctx, args, flags):
+        if len(args) < 2:
+            return self.get_usage_embed(ctx)
+
+        text = ' '.join(args[1:])
+
+        find = re.findall(args[0], text)
+
+        return '\n'.join(find) if find else f':information_source: Não foi possível encontrar nenhuma ocorrência de `{args[0]}` no texto informado.'
+
+class CBase64(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "base64",
+            aliases = ['b64'],
+            description = "Transforma ou restaura uma string informada com o formato base64.",
+            usage = '[texto...] [-e|--encode] [-d|--decode]'
+        )
+
+    async def run(self, ctx, args, flags):
+        if not args:
+            return self.get_usage_embed(ctx)
+
+        data = ' '.join(args).encode('utf-8')
+
+        if 'e' in flags or 'encode' in flags:
+            return base64.b64encode(data).decode('utf-8')
+        elif 'd' in flags or 'decode' in flags:
+            return base64.b64decode(data).decode('utf-8')
+        else:
+            return self.get_usage_embed(ctx)
+
+class CMd5(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "md5",
+            description = "Transforma uma string informada para uma hash md5.",
+            usage = '[texto...]'
+        )
+
+    async def run(self, ctx, args, flags):
+        if not args:
+            return self.get_usage_embed(ctx)
+
+        data = ' '.join(args).encode('utf-8')
+        return hashlib.md5(data).hexdigest()

@@ -4,6 +4,7 @@ import time
 import datetime
 import math
 import discord
+import random
 
 from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType, Slider
 from navibot.errors import CommandError
@@ -306,9 +307,49 @@ class CCoinflip(InterpretedCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            'embed -t "{getmember --self --name} acabou de jogar a moeda para o alto!" -timg "https://cdn140.picsart.com/272800024023211.png?type=webp&to=min&r=256" -d "O resultado é *{choice cara coroa}*."',
+            'embed -t "Coinflip" -d "{getmember --self --mention} acabou de jogar a moeda para o alto e tirou **{choice CARA COROA | fw}** !" -timg https://thumbs.gfycat.com/ImmaterialCandidBooby-size_restricted.gif',
             name = "coinflip",
             aliases = ['flip'],
             description = "Joga uma moeda para o alto e retorna um resultado entre cara ou coroa."
         )
 
+class CPat(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "pat",
+            aliases = ['pt'],
+            description = "Faz um carinho no usuário mencionado :flushed:.",
+            usage = '@Usuario'
+        )
+
+        self.image_list = [
+            r'https://media1.tenor.com/images/116fe7ede5b7976920fac3bf8067d42b/tenor.gif?itemid=9200932',
+            r'https://media1.tenor.com/images/0ac15c04eaf7264dbfac413c6ce11496/tenor.gif?itemid=16121044',
+            r'https://media1.tenor.com/images/da8f0e8dd1a7f7db5298bda9cc648a9a/tenor.gif?itemid=12018819',
+            r'https://media1.tenor.com/images/c0bcaeaa785a6bdf1fae82ecac65d0cc/tenor.gif?itemid=7453915',
+            r'https://media1.tenor.com/images/1e92c03121c0bd6688d17eef8d275ea7/tenor.gif?itemid=9920853',
+            r'https://media1.tenor.com/images/5466adf348239fba04c838639525c28a/tenor.gif?itemid=13284057',
+            r'https://media1.tenor.com/images/291ea37382e1d6cd33349c50a398b6b9/tenor.gif?itemid=10204936',
+            r'https://media1.tenor.com/images/f330c520a8dfa461130a799faca13c7e/tenor.gif?itemid=13911345',
+            r'https://media1.tenor.com/images/0ea33070f2294ad89032c69d77230a27/tenor.gif?itemid=16053520',
+            r'https://media1.tenor.com/images/265e0594b12829a641b3efc0782a1732/tenor.gif?itemid=15114645'
+        ]
+
+    async def run(self, ctx, args, flags):
+        mentions = flags.get('mentions', None)
+        target = None
+
+        if not mentions:
+            return self.get_usage_embed(ctx)
+        else:
+            target = mentions[0]
+
+        if target == ctx.author:
+            return ':information_source: Você não pode dar carinho em você mesmo :thinking:'
+
+        embed = ctx.create_response_embed()
+        embed.description = f'{ctx.author.mention} fez carinho em {target.mention} :heart:'
+        embed.set_image(url=random.choice(self.image_list))
+        
+        return embed
