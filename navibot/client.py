@@ -655,18 +655,22 @@ class Bot:
         await self.client.close()
 
     async def get_database_connection(self):
-        if not self.active_database:
-            self.active_database = databases.Database(
-                self.config.get('database.connection_string')
-            )
+        # @NOTE:
+        # Exception rara, aonde conectamos 2 vezes no banco ao mesmo tempo
+        # devido a falta da trava!!!
+        async with asyncio.Lock() as lock:
+            if not self.active_database:
+                self.active_database = databases.Database(
+                    self.config.get('database.connection_string')
+                )
 
-        if not self.active_database.is_connected:
-            try:
-                await self.active_database.connect()
-            except Exception as e:
-                logging.error(f'Connecting to the database failed: {e}')
+            if not self.active_database.is_connected:
+                try:
+                    await self.active_database.connect()
+                except Exception as e:
+                    logging.error(f'Connecting to the database failed: {e}')
 
-                raise DatabaseError('Não foi possível conectar-se à base de dados.')
+                    raise DatabaseError('Não foi possível conectar-se à base de dados.')
         
         return self.active_database
 

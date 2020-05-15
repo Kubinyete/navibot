@@ -394,7 +394,7 @@ class CTriggered(BotCommand):
             url = str(mentions[0].avatar_url_as(size=self.max_image_size))
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as sess:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
                 async with sess.get(url) as resp:
                     if resp.status == 200:
                         bytes = await resp.read()
@@ -403,7 +403,7 @@ class CTriggered(BotCommand):
         except aiohttp.ClientError as e:
             logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.")
 

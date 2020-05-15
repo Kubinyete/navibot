@@ -39,3 +39,4 @@
 - [ ] buy item_id
 - [ ] giveitem item_id @Usuario
 - [ ] givecredits amount @Usuario
+- [ ] addreactionrole reaction @Role
