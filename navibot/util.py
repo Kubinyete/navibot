@@ -1,5 +1,6 @@
 import re
 import math
+import PIL.Image
 
 def is_subclass(cls, clsparent):
     if cls.__name__ == clsparent.__name__:
@@ -101,3 +102,28 @@ def string_fullwidth(string):
 
 def string_fullwidth_alphanumeric(string):
     return ''.join([char_fullwidth_alphanumeric(char) for char in string])
+
+def normalize_image_size(img, size):
+    # @NOTE
+    # Diminuindo o tamanho da imagem de entrada, evitando imagens gigantes
+    if img.width > size or img.height > size:
+        fw = img.width
+        fh = img.height
+
+        while fw > size or fh > size:
+            wfactor = size / fw 
+            hfactor = size / fh
+
+            if wfactor < 1:
+                fw *= wfactor
+                fh *= wfactor
+            elif hfactor < 1:
+                fw *= hfactor
+                fh *= hfactor
+        
+        return img.resize((
+            math.floor(fw),
+            math.floor(fh)
+        ))
+    else:
+        return img

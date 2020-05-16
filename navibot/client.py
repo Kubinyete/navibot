@@ -74,6 +74,23 @@ class BotContext(Context):
 
         return e
 
+    async def get_last_sent_attachment(self, limit: int, expected_file_extensions: tuple):
+        if not self.channel or not self.message:
+            raise BotError('É preciso que o contexto possua um canal e uma mensagem para poder obter um anexo.')
+
+        async for message in self.channel.history(limit=limit, before=self.message.created_at):
+            for atch in message.attachments:
+                valid = False
+                for ext in expected_file_extensions:
+                    if atch.filename.lower().endswith('.' + ext):
+                        valid = True
+                        break
+
+                if not valid:
+                    continue
+                else:
+                    return atch
+
     async def reply(self, response, use_embed_as_default: bool=True):
         if not self.channel and not self.author:
             raise BotError('Não é possível responder o contexto atual, não existe nenhum canal ou usuário selecionado.')
@@ -93,7 +110,7 @@ class BotContext(Context):
         elif isinstance(response, discord.Embed):
             return await target.send(embed=response)
 
-        elif is_instance(response, discord.File):
+        elif isinstance(response, discord.File):
             return await target.send(file=response)
 
         elif isinstance(response, Slider):

@@ -23,10 +23,10 @@
 - [X] base64 (2020-05-12 01:11:08) encode/decode
 - [X] md5 (2020-05-12 01:26:55) hexdigest
 - [X] pat @Usuario
-- [X] triggered [@Usuario] [URL] (2020-05-12 14:34:10)
-- [ ] hug @Usuario
+- [X] triggered [@Usuario] [URL] [discord_attachment] (2020-05-12 14:34:10)
+- [X] think [@Usuario] [URL] [discord_attachment] (2020-05-15 23:45:33)
 - [ ] scared (interpretado)
-- [ ] think [@Usuario] [URL] [discord_attachment]
+- [ ] hug @Usuario
 - [ ] text2image [texto...]
 - [ ] asciify [@Usuario] [URL] [discord_attachment]
 - [ ] marry @Usuario

@@ -11,7 +11,7 @@ import aiohttp
 
 from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType, Slider
 from navibot.errors import CommandError
-from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string
+from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string, bytes_string, normalize_image_size
 
 class CHelp(BotCommand):
     def __init__(self, bot):
@@ -364,16 +364,23 @@ class CTriggered(BotCommand):
             name = "triggered",
             aliases = ['trig'],
             description = "T R I G G E R E D.",
-            usage = '[URL] [@Usuario]'
+            usage = '[URL] [@Usuario] [discord.File]',
+            supported_args_type = (str, discord.File)
         )
 
         self.triggered_image = PIL.Image.open(
             f'{self.bot.curr_path}/repo/std/triggered.png'
         )
 
+        # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
+        self.triggered_image.load()
+
+        self.max_image_byte_size = 512 * 1024 ^ 2
         self.max_image_size = 256
-        self.red_factor = 3
-        self.suppress_factor = 0.5
+        self.supported_file_extensions = ('png', 'jpg', 'jpeg', 'gif', 'webp')
+        self.history_limit = 25
+        self.red_factor = 2.5
+        self.suppress_factor = .9
 
     async def run(self, ctx, args, flags):
         mentions = flags.get('mentions', None)
@@ -383,31 +390,46 @@ class CTriggered(BotCommand):
 
         if not mentions:
             if args:
-                url = args[0]
+                if isinstance(args[0], discord.File):
+                    bytes = args[0].fp
+                else:
+                    url = args[0]
             else:
-                # @TODO:
-                # Obter a ultima imagem enviada no canal atual dentro de Context
-                # Usar algum auxilio de BotContext ou BotCommand para que seja algo
-                # normalizado na nossa estrutura de comandos
-                return self.get_usage_embed(ctx)
+                atch = await ctx.get_last_sent_attachment(self.history_limit, self.supported_file_extensions)
+
+                if atch:
+                    if atch.size > self.max_image_byte_size:
+                            raise CommandError(f'O tamanho em bytes da ultima imagem neste canal ultrapassa o limite permitido de {bytes_string(self.max_image_byte_size)} pelo comando.')
+                    else:
+                        url = atch.url
+
+                else:
+                    raise CommandError(f'Não foi possível encontrar uma imagem suportada no histórico do canal nas últimas {self.history_limit} mensagens.')
         else:
             url = str(mentions[0].avatar_url_as(size=self.max_image_size))
 
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
-                async with sess.get(url) as resp:
-                    if resp.status == 200:
-                        bytes = await resp.read()
-                    else:
-                        raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
-        except aiohttp.ClientError as e:
-            logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
-            raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
-        except asyncio.TimeoutError as e:
-            logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
-            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.")
+        await ctx.channel.trigger_typing()
 
-        bio_input = io.BytesIO(bytes)
+        if not bytes:
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
+                    async with sess.get(url) as resp:
+                        if resp.status == 200:
+                            bytes = await resp.read()
+                        else:
+                            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
+            except aiohttp.ClientError as e:
+                logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
+                raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
+            except asyncio.TimeoutError as e:
+                logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
+                raise CommandError("Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.")
+            finally:
+                bio_input = io.BytesIO(bytes)
+        else:
+            # Já é BytesIO
+            bio_input = bytes
+
         bio_output = io.BytesIO()
 
         def callable_apply_triggered_effect():
@@ -421,30 +443,9 @@ class CTriggered(BotCommand):
             if not curr_img.format in ('PNG', 'JPG', 'JPEG', 'GIF', 'WEBP'):
                 raise CommandError('O formato da imagem é inválido.')
 
-            curr_img = curr_img.convert(mode='RGB')
+            curr_img = curr_img.convert(mode='RGBA')
             trigered_image_copy = self.triggered_image.copy()
-
-            # @NOTE
-            # Diminuindo o tamanho da imagem de entrada, evitando imagens gigantes
-            if curr_img.width > self.max_image_size or curr_img.height > self.max_image_size:
-                fw = curr_img.width
-                fh = curr_img.height
-
-                while fw > self.max_image_size or fh > self.max_image_size:
-                    wfactor = self.max_image_size / fw 
-                    hfactor = self.max_image_size / fh
-
-                    if wfactor < 1:
-                        fw *= wfactor
-                        fh *= wfactor
-                    elif hfactor < 1:
-                        fw *= hfactor
-                        fh *= hfactor
-                
-                curr_img = curr_img.resize((
-                    math.floor(fw),
-                    math.floor(fh)
-                ))
+            curr_img = normalize_image_size(curr_img, self.max_image_size)
 
             # @NOTE:
             # 1. Redimensionar trigered_image_copy para que tenha a mesma largura que curr_img
@@ -463,13 +464,13 @@ class CTriggered(BotCommand):
 
                     v1 = math.floor(p[0] * self.red_factor)
                     v2 = math.floor(p[1] * self.suppress_factor)
-                    v3 = math.floor(p[0] * self.suppress_factor)
+                    v3 = math.floor(p[2] * self.suppress_factor)
                     
                     v1 = 255 if v1 > 255 else v1
                     # v2 = 255 if v2 > 255 else v2
                     # v3 = 255 if v3 > 255 else v3
 
-                    pixel[(x, y)] = (v1, v2, v3)
+                    pixel[(x, y)] = (v1, v2, v3, p[3])
 
             factor = curr_img.width / trigered_image_copy.width
 
@@ -478,8 +479,11 @@ class CTriggered(BotCommand):
                 math.floor(trigered_image_copy.height * factor)
             ))
 
-            curr_img.paste(trigered_image_copy, box=(0, curr_img.height - trigered_image_copy.height))
-            curr_img.save(bio_output, format='JPEG')
+            curr_img.paste(
+                trigered_image_copy, 
+                (0, curr_img.height - trigered_image_copy.height)
+            )
+            curr_img.save(bio_output, format='PNG')
 
         await asyncio.get_running_loop().run_in_executor(
             None,
@@ -491,5 +495,120 @@ class CTriggered(BotCommand):
         bio_output.seek(0, io.SEEK_SET)
         return discord.File(
             bio_output,
-            filename='triggered.jpeg'
+            filename='triggered.png'
+        )
+
+class CThinking(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "thinking",
+            aliases = ['think'],
+            description = "Hmmmmmmmmmmm :thinking:.",
+            usage = '[URL] [@Usuario] [discord.File]',
+            supported_args_type = (str, discord.File)
+        )
+
+        self.thinking_image = PIL.Image.open(
+            f'{self.bot.curr_path}/repo/std/thinkinghand.png'
+        )
+
+        # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
+        self.thinking_image.load()
+
+        self.max_image_byte_size = 512 * 1024 ^ 2
+        self.max_image_size = 256
+        self.supported_file_extensions = ('png', 'jpg', 'jpeg', 'gif', 'webp')
+        self.history_limit = 25
+
+    async def run(self, ctx, args, flags):
+        mentions = flags.get('mentions', None)
+        
+        url = None
+        bytes = None
+
+        if not mentions:
+            if args:
+                if isinstance(args[0], discord.File):
+                    bytes = args[0].fp
+                else:
+                    url = args[0]
+            else:
+                atch = await ctx.get_last_sent_attachment(self.history_limit, self.supported_file_extensions)
+
+                if atch:
+                    if atch.size > self.max_image_byte_size:
+                            raise CommandError(f'O tamanho em bytes da ultima imagem neste canal ultrapassa o limite permitido de {bytes_string(self.max_image_byte_size)} pelo comando.')
+                    else:
+                        url = atch.url
+
+                else:
+                    raise CommandError(f'Não foi possível encontrar uma imagem suportada no histórico do canal nas últimas {self.history_limit} mensagens.')
+        else:
+            url = str(mentions[0].avatar_url_as(size=self.max_image_size))
+
+        await ctx.channel.trigger_typing()
+
+        if not bytes:
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
+                    async with sess.get(url) as resp:
+                        if resp.status == 200:
+                            bytes = await resp.read()
+                        else:
+                            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
+            except aiohttp.ClientError as e:
+                logging.exception(f'CTHINKING: {type(e).__name__}: {e}')
+                raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
+            except asyncio.TimeoutError as e:
+                logging.exception(f'CTHINKING: {type(e).__name__}: {e}')
+                raise CommandError("Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.")
+            finally:
+                bio_input = io.BytesIO(bytes)
+        else:
+            # Já é BytesIO
+            bio_input = bytes
+
+        bio_output = io.BytesIO()
+
+        def callable_apply_thinking_effect():
+            curr_img = None
+
+            try:
+                curr_img = PIL.Image.open(bio_input)
+            except Exception:
+                raise CommandError('Não foi possível abrir a imagem a partir dos dados recebidos.')
+
+            if not curr_img.format in ('PNG', 'JPG', 'JPEG', 'GIF', 'WEBP'):
+                raise CommandError('O formato da imagem é inválido.')
+
+            curr_img = curr_img.convert(mode='RGBA')
+            thinking_image_copy = self.thinking_image.copy()
+            curr_img = normalize_image_size(curr_img, self.max_image_size)
+            # @NOTE:
+            # 1. Redimensionar thinking_image_copy para que apresente 1/2 do tamanho vertical de curr_img
+
+            thinking_image_copy = normalize_image_size(
+                thinking_image_copy, 
+                math.floor(curr_img.height / 2)
+            )
+
+            curr_img.paste(
+                thinking_image_copy, 
+                (math.floor(curr_img.width / 2 - thinking_image_copy.height / 2), curr_img.height - thinking_image_copy.height),
+                thinking_image_copy
+            )
+            curr_img.save(bio_output, format='PNG')
+
+        await asyncio.get_running_loop().run_in_executor(
+            None,
+            callable_apply_thinking_effect
+        )
+
+        # @NOTE:
+        # discord.py: se não voltarmos o ponteiro, não lemos nada
+        bio_output.seek(0, io.SEEK_SET)
+        return discord.File(
+            bio_output,
+            filename='thinking.png'
         )
