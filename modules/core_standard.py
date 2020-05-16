@@ -408,7 +408,7 @@ class CTriggered(BotCommand):
         else:
             url = str(mentions[0].avatar_url_as(size=self.max_image_size))
 
-        await ctx.channel.trigger_typing()
+        # await ctx.channel.trigger_typing()
 
         if not bytes:
             try:
@@ -547,7 +547,7 @@ class CThinking(BotCommand):
         else:
             url = str(mentions[0].avatar_url_as(size=self.max_image_size))
 
-        await ctx.channel.trigger_typing()
+        # await ctx.channel.trigger_typing()
 
         if not bytes:
             try:
