@@ -14,14 +14,14 @@ class CYandere(BotCommand):
             name = "yandere",
             aliases = ['ynd'],
             description = "Exibe um Slider de uma ou mais imagens retornadas pela API do site yande.re de acordo com as tags informadas por argumento.",
-            usage = "[--post] [tag1] [tagN]... [--page=1] | --tag [tagname1...]"
+            usage = "[--post] [tag1] [tagN]... [--page=1] | --tag [buscaTag...]"
         )
 
         self.api = YandereApi()
 
         # s: safe, q: questionable, e: explicit
         self.safe_ratings = ('s')
-        self.tags_per_embed = 20
+        self.tags_per_page = 20
         self.posts_per_page = 20
 
     async def run(self, message, args, flags):
@@ -49,8 +49,8 @@ class CYandere(BotCommand):
             i = 0
             description = ""
             for tag in tag_json:
-                if i and i % self.tags_per_embed == 0:
-                    embed = self.create_response_embed(message)
+                if i and i % self.tags_per_page == 0:
+                    embed = message.create_response_embed()
                 
                     embed.description = description
                     embed.title = f"Lista de tag(s)"
@@ -61,8 +61,8 @@ class CYandere(BotCommand):
                 description += f"`{tag['name']}` ({self.api.tagtype_string(tag['type'])}) ({tag['count']})\n"
                 i += 1
 
-            if i % self.tags_per_embed != 0:
-                embed = self.create_response_embed(message)
+            if i % self.tags_per_page != 0:
+                embed = message.create_response_embed()
 
                 embed.description = description
                 embed.title = f"Lista de tag(s)"
@@ -85,7 +85,7 @@ class CYandere(BotCommand):
 
             for post in post_json:
                 if not nsfw_disabled or post['rating'] in self.safe_ratings:
-                    embed = self.create_response_embed(message)
+                    embed = message.create_response_embed()
                     
                     description = f"`{post['tags']}`\n"
                     description += f":information_source: Ver [amostra]({post['sample_url']}) ({post['sample_width']}x{post['sample_height']}) ({bytes_string(post['sample_file_size'])})\n"

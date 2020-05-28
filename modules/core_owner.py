@@ -3,7 +3,7 @@ import asyncio
 import logging
 import aiohttp
 
-from navibot.client import BotCommand, InterpretedCommand, PermissionLevel, ReactionType
+from navibot.client import BotCommand, InterpretedCommand, PermissionLevel, EmojiType
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
 
@@ -28,12 +28,11 @@ class CSetAvatar(BotCommand):
         avatar_bytes = None
 
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as sess:
-                async with sess.get(avatar_url) as resp:
-                    if resp.status == 200:
-                        avatar_bytes = await resp.read()
-                    else:
-                        raise CommandError("Não foi possível obter o novo avatar através da URL fornecida, o destino não retornou OK.")
+            async with self.bot.get_http_session().get(avatar_url) as resp:
+                if resp.status == 200:
+                    avatar_bytes = await resp.read()
+                else:
+                    raise CommandError("Não foi possível obter o novo avatar através da URL fornecida, o destino não retornou OK.")
         except aiohttp.ClientError as e:
             logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível obter o novo avatar através da URL fornecida.")
@@ -55,7 +54,7 @@ class CSetAvatar(BotCommand):
             logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível editar o perfil do bot, o tempo limite de envio foi excedido.")
             
-        return ReactionType.SUCCESS
+        return EmojiType.CHECK_MARK
 
 class CSetName(BotCommand):
     def __init__(self, bot):
@@ -87,7 +86,7 @@ class CSetName(BotCommand):
             logging.exception(f'CSETNAME: {type(e).__name__}: {e}')
             raise CommandError("Não foi possível editar o perfil do bot.")
             
-        return ReactionType.SUCCESS
+        return EmojiType.CHECK_MARK
 
 class CGuildVariables(BotCommand):
     def __init__(self, bot):
@@ -123,12 +122,12 @@ class CGuildVariables(BotCommand):
             if 'reset' in flags:
                 try:
                     if await gsm.remove_guild_variable(expected_variable):
-                        return ReactionType.SUCCESS
+                        return EmojiType.CHECK_MARK
                     else:
-                        return ReactionType.FAILURE
+                        return EmojiType.CROSS_MARK
                 except Exception as e:
                     logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
-                    return ReactionType.FAILURE
+                    return EmojiType.CROSS_MARK
             else:
                 if len(args) > 1:
                     new_value = ' '.join(args[1:])
@@ -141,17 +140,17 @@ class CGuildVariables(BotCommand):
 
                     try:
                         if await gsm.update_guild_variable(expected_variable):
-                            return ReactionType.SUCCESS
+                            return EmojiType.CHECK_MARK
                         else:
                             expected_variable.set_value(prev_value)
                         
-                            return ReactionType.FAILURE
+                            return EmojiType.CROSS_MARK
                     except Exception as e:
                         logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
                         
                         expected_variable.set_value(prev_value)
                         
-                        return ReactionType.FAILURE
+                        return EmojiType.CROSS_MARK
                 else:
                     # Sem formatação, pois podemos utilizar o valor da variável em outros comandos
                     # return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
@@ -183,7 +182,7 @@ class CAddCommand(BotCommand):
                 )
             )
 
-            return ReactionType.SUCCESS
+            return EmojiType.CHECK_MARK
         except Exception as e:
             logging.exception(f'CADDCOMMAND: {type(e).__name__}: {e}')
 
@@ -207,7 +206,7 @@ class CRemoveCommand(BotCommand):
         try:
             self.bot.remove_interpreted_command(args[0])
             
-            return ReactionType.SUCCESS
+            return EmojiType.CHECK_MARK
         except Exception as e:
             logging.exception(f'CREMOVECOMMAND: {type(e).__name__}: {e}')
             raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n\n`{e}`')
@@ -225,7 +224,7 @@ class CReload(BotCommand):
     async def run(self, ctx, args, flags):
         try:
             await self.bot.reload_all_modules()
-            return ReactionType.SUCCESS
+            return EmojiType.CHECK_MARK
         except Exception as e:
             logging.exception(f'CHOTRELOAD: {type(e).__name__}: {e}')
             raise CommandError(f'Ocorreu um erro ao tentar efetuar o reload:\n\n`{type(e).__name__}: {e}`')

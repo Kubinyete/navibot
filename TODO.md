@@ -23,20 +23,31 @@
 - [X] base64 (2020-05-12 01:11:08) encode/decode
 - [X] md5 (2020-05-12 01:26:55) hexdigest
 - [X] pat @Usuario
-- [X] triggered [@Usuario] [URL] [discord_attachment] (2020-05-12 14:34:10)
-- [X] think [@Usuario] [URL] [discord_attachment] (2020-05-15 23:45:33)
+- [X] triggered [@Usuario] [URL] [Attachment] (2020-05-12 14:34:10)
+- [X] think [@Usuario] [URL] [Attachment] (2020-05-15 23:45:33)
+- [ ] textimage [texto...]
+
+#### Comandos - Low Priority
+
+- [ ] help [cmd] [--syntax]
+
 - [ ] scared (interpretado)
 - [ ] hug @Usuario
-- [ ] text2image [texto...]
-- [ ] asciify [@Usuario] [URL] [discord_attachment]
+
+- [ ] asciify [@Usuario] [URL] [Attachment]
+
+#### Comandos - DB Interactivity
+
 - [ ] marry @Usuario
 - [ ] divorce @Usuario
-- [ ] help [cmd] --about --syntax
-- [ ] showlevelupmessage [-d|--disable] [-e|--enable] @Usuario
-- [ ] profile @Usuario
-- [ ] credits
-- [ ] shop
-- [ ] buy item_id
-- [ ] giveitem item_id @Usuario
-- [ ] givecredits amount @Usuario
-- [ ] addreactionrole reaction @Role
+
+- [ ] profile [@Usuario]
+- [ ] credits [@Usuario]
+- [ ] exp [@Usuario]
+- [ ] givecredits amount [@Usuario]
+- [ ] giveexp amount [@Usuario]
+
+- [ ] shop [buy|search|show] [itemName]
+
+- [ ] reactionroles reactionRoleId reaction @Role [--list] [--remove-messages] [--make]
+    Pensar melhor nisso aqui, como resolver a questão de limpar roles e a mensagem que da os roles, etc...

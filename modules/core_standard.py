@@ -9,7 +9,7 @@ import io
 import PIL.Image
 import aiohttp
 
-from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, ReactionType, Slider
+from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, EmojiType, Slider
 from navibot.errors import CommandError
 from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string, bytes_string, normalize_image_size
 
@@ -164,7 +164,7 @@ class CRemind(BotCommand):
             if cid >= 0 and cid < len(stored):
                 stored.remove(stored[cid])
 
-                return ReactionType.SUCCESS
+                return EmojiType.CHECK_MARK
             else:
                 raise CommandError("O identificador informado ao argumento `--remove` não existe.")
         elif 'clear' in flags:
@@ -200,7 +200,7 @@ class CRemind(BotCommand):
                 stored.append(t)
                 t.create_task()
 
-                return ReactionType.SUCCESS
+                return EmojiType.CHECK_MARK
             else:
                 raise CommandError(f"Você atingiu o limite de {self.limit} lembretes registrados, por favor tente mais tarde.")
         
@@ -412,12 +412,11 @@ class CTriggered(BotCommand):
 
         if not bytes:
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
-                    async with sess.get(url) as resp:
-                        if resp.status == 200:
-                            bytes = await resp.read()
-                        else:
-                            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
+                async with self.bot.get_http_session().get(url) as resp:
+                    if resp.status == 200:
+                        bytes = await resp.read()
+                    else:
+                        raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
             except aiohttp.ClientError as e:
                 logging.exception(f'CTRIGGERED: {type(e).__name__}: {e}')
                 raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
@@ -551,12 +550,11 @@ class CThinking(BotCommand):
 
         if not bytes:
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as sess:
-                    async with sess.get(url) as resp:
-                        if resp.status == 200:
-                            bytes = await resp.read()
-                        else:
-                            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
+                async with self.bot.get_http_session().get(url) as resp:
+                    if resp.status == 200:
+                        bytes = await resp.read()
+                    else:
+                        raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
             except aiohttp.ClientError as e:
                 logging.exception(f'CTHINKING: {type(e).__name__}: {e}')
                 raise CommandError("Não foi possível obter a imagem através da URL fornecida.")

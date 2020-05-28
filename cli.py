@@ -70,6 +70,7 @@ class ClientApp:
             loop=self.loop
         )
 
+        # Fica processando comandos da stdin ao mesmo tempo que lida com pacotes de resposta
         return await asyncio.gather(
             self.handle_input_loop(writer),
             self.handle_recv_packet_loop(reader)
@@ -107,6 +108,7 @@ class ClientApp:
         sys.stdout.write("\033[0K")
         # Manda a mensagem
         sys.stdout.write(f'{msg}\n')
+        
         # Volta o input do usuário
         self.write_input(False, True)
 

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from navibot.client import BotCommand, ModuleHook, BotContext, ReactionType, PermissionLevel
+from navibot.client import BotCommand, ModuleHook, BotContext, EmojiType, PermissionLevel, ClientEvent
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
 
@@ -29,12 +29,12 @@ class CNsfw(BotCommand):
 
             try:
                 if await gsm.update_guild_variable(var):
-                    return ReactionType.SUCCESS
+                    return EmojiType.CHECK_MARK
                 else:
-                    return ReactionType.FAILURE
+                    return EmojiType.CROSS_MARK
             except Exception as e:
                 logging.exception(f'CNSFW: {type(e).__name__}: {e}')
-                return ReactionType.FAILURE
+                return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `nsfw_disabled` não encontrado no contexto da Guild atual.')
 
@@ -43,7 +43,7 @@ class CSetWelcomeChannel(BotCommand):
         super().__init__(
             bot,
             name = 'setwelcomechannel',
-            description = "Configura um canal para ser utilizado como canal de boas-vindas toda vez que um membro novo entrar na Guild.",
+            description = "Configura um canal para ser utilizado como canal de boas-vindas toda vez que um membro novo entrar na Guild, a mensagem pode ser customizada através do comando `setwelcomemessage`.",
             usage = "#Channel [-d|--disable]",
             permissionlevel=PermissionLevel.GUILD_MOD
         )
@@ -68,12 +68,12 @@ class CSetWelcomeChannel(BotCommand):
 
             try:
                 if await gsm.update_guild_variable(var):
-                    return ReactionType.SUCCESS
+                    return EmojiType.CHECK_MARK
                 else:
-                    return ReactionType.FAILURE
+                    return EmojiType.CROSS_MARK
             except Exception as e:
                 logging.exception(f'CSETWELCOMECHANNEL: {type(e).__name__}: {e}')
-                return ReactionType.FAILURE
+                return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `gst_welcome_channel_id` não encontrado no contexto da Guild atual.')
 
@@ -82,7 +82,7 @@ class CSetWelcomeMessage(BotCommand):
         super().__init__(
             bot,
             name = 'setwelcomemessage',
-            description = "Configura um comando para ser executado toda vez que um membro novo entrar na Guild atual.",
+            description = "Configura um comando para ser executado toda vez que um membro novo entrar na Guild atual, por favor veja `help --syntax` antes de tentar trocá-la.",
             usage = "[comando...]",
             permissionlevel=PermissionLevel.GUILD_MOD
         )
@@ -101,12 +101,12 @@ class CSetWelcomeMessage(BotCommand):
 
             try:
                 if await gsm.update_guild_variable(var):
-                    return ReactionType.SUCCESS
+                    return EmojiType.CHECK_MARK
                 else:
-                    return ReactionType.FAILURE
+                    return EmojiType.CROSS_MARK
             except Exception as e:
                 logging.exception(f'CSETWELCOMEMESSAGE: {type(e).__name__}: {e}')
-                return ReactionType.FAILURE
+                return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `gst_welcome_channel_message` não encontrado no contexto da Guild atual.')
 
@@ -122,7 +122,7 @@ class CSimulateMemberJoin(BotCommand):
 
     async def run(self, ctx, args, flags):
         await self.bot.client.dispatch_event(
-            'member_join',
+            ClientEvent.MEMBER_JOIN,
             member=ctx.author
         )
         
@@ -148,12 +148,12 @@ class CSetPrefix(BotCommand):
 
             try:
                 if await gsm.update_guild_variable(var):
-                    return ReactionType.SUCCESS
+                    return EmojiType.CHECK_MARK
                 else:
-                    return ReactionType.FAILURE
+                    return EmojiType.CROSS_MARK
             except Exception as e:
                 logging.exception(f'CSETPREFIX: {type(e).__name__}: {e}')
-                return ReactionType.FAILURE
+                return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `bot_prefix` não encontrado no contexto da Guild atual.')
 
@@ -184,6 +184,6 @@ class HWelcomeMessage(ModuleHook):
     
     def run(self):
         self.bind_event(
-            'member_join',
+            ClientEvent.MEMBER_JOIN,
             self.callable_receive_member_join
         )

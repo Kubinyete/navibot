@@ -35,27 +35,6 @@ O grande diferencial deste bot, é a implementação de um operador PIPE (|) e a
 
 ![Operador PIPE](https://raw.githubusercontent.com/Kubinyete/navibot/dev/repo/doc/operador-pipe.png)
 
-Isso permite que até os comandos mais básicos do bot sejam utilizados para formarem outros comandos, como é o caso dos "comandos interpretados" carregados durante a inicialização (a forma com que esses comandos são carregados pode estar sujeito a mudanças no futuro).
-
-```json
-{
-    "interpreted_commands": [
-        {
-            "name": "ayaya", 
-            "value": "embed -img \"{choice https://cdn.frankerfacez.com/emoticon/162146/4 https://cdn.frankerfacez.com/emoticon/250475/4 https://i.imgur.com/jS7AgX5.gif}\" -t AYAYA -d \"{getarg --all}\""
-        },
-        {
-            "name": "rainbowpls", 
-            "value": "embed -img \"{choice https://i.imgur.com/WYVUg98.gif https://i.imgur.com/XWvZihi.gif}\" -t RainbowPls -d \"{getarg --all}\""
-        },
-        {
-            "name": "chikapls", "
-            value": "embed -img \"{choice https://i.imgur.com/7mRPZXg.gif https://i.imgur.com/gQMkb2L.gif https://i.imgur.com/8URcIR1.gif}\" -t chikaPls -d \"{getarg --all}\""
-        }
-    ]
-}
-```
-
 Adicionalmente, é possível registrar "ganchos" que são carregados e registram-se em eventos do cliente, como é o caso deste ModuleHook que fica responsável por receber os membros que recentemente entraram em uma Guild, e processar, de acordo com o contexto da Guild, a mensagem de boas-vindas configurada pela Guild (que neste caso, assumimos também que seja um comando).
 
 ```py
@@ -74,7 +53,7 @@ class HWelcomeMessage(ModuleHook):
 
             if channel:
                 await self.bot.handle_command_parse(
-                    Context(
+                    BotContext(
                         self.bot,
                         channel,
                         member.guild,
@@ -85,7 +64,7 @@ class HWelcomeMessage(ModuleHook):
     
     def run(self):
         self.bind_event(
-            'member_join',
+            ClientEvent.MEMBER_JOIN,
             self.callable_receive_member_join
         )
 ```

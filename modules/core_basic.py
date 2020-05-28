@@ -2,6 +2,7 @@ import re
 import base64
 import hashlib
 import logging
+import asyncio
 
 from datetime import datetime
 from random import randint, choice
@@ -41,11 +42,8 @@ class CSay(BotCommand):
         if not args:
             return self.get_usage_embed(ctx)
         
-        # @HACK: Utiliza o método diretamente para poder fazer com que o bot não utilize embeds por padrão
+        # @"HACK": Utiliza o método diretamente para poder fazer com que o bot não utilize embeds por padrão
         await ctx.reply(args, use_embed_as_default=False)
-
-        # Força a PIPELINE a não poder continuar
-        return None
 
 class CFullwidth(BotCommand):
     def __init__(self, bot):
@@ -61,7 +59,10 @@ class CFullwidth(BotCommand):
         if not args:
             return self.get_usage_embed(ctx)
 
-        return [string_fullwidth_alphanumeric(arg) for arg in args]
+        for i in range(len(args)):
+            args[i] = string_fullwidth_alphanumeric(args[i])
+
+        return args
 
 class CClap(BotCommand):
     def __init__(self, bot):
@@ -87,7 +88,6 @@ class CDateFormat(BotCommand):
             aliases = ['datefmt'],
             description = "Retorna a data ou horário formatado de acordo com a string informada (Ex: %H:%M:%S ou %d/%m/%Y).",
             usage = 'formato',
-            hidden = True
         )
 
     async def run(self, ctx, args, flags):
@@ -109,7 +109,6 @@ class CTime(InterpretedCommand):
             aliases = ['tm'],
             command = 'dateformat %H:%M:%S',
             description = 'Retorna o horário atual dado pelo formato %H:%M:%S.',
-            hidden = True
         )
 
 class CDate(InterpretedCommand):
@@ -120,36 +119,26 @@ class CDate(InterpretedCommand):
             aliases = ['dt'],
             command = 'dateformat %d/%m/%Y',
             description = 'Retorna a data atual dado pelo formato %d/%m/%Y.',
-            hidden = True
         )
 
-class CFormat(BotCommand):
+class CReverse(BotCommand):
     def __init__(self, bot):
         super().__init__(
             bot,
-            name = 'format',
-            aliases = ['fmt'],
-            description = "Aplica todas as alterações passadas por argumento.",
-            usage = "[-u|--upper] [-l|--lower] [-r|--reverse]",
-            hidden = True
+            name = 'reverse',
+            aliases = ['rev'],
+            description = "Reverte toda a cadeia de caracteres informada como argumento.",
+            usage = "[texto...]",
         )
-
-    def transform(self, transf: str, flags: dict):
-        for flag in flags.keys():
-            if flag in ('u', 'upper'):
-                transf = transf.upper()
-            elif flag in ('l', 'lower'):
-                transf = transf.lower()
-            elif flag in ('r', 'reverse'):
-                transf = transf[::-1]
-
-        return transf
 
     async def run(self, ctx, args, flags):
         if not args:
             return self.get_usage_embed(ctx)
 
-        return [self.transform(transf, flags) for transf in args]
+        for i in range(len(args)):
+            args[i] = args[i][::-1]
+
+        return args
 
 class CChoice(BotCommand):
     def __init__(self, bot):
@@ -173,8 +162,8 @@ class CRoll(BotCommand):
             bot,
             name = "roll",
             aliases = ['dice'],
-            description = "Retorna um número aleatório entre [min] e [max].",
-            usage = "[min=0] [max=6]"
+            description = "Retorna um número aleatório entre [min=0] e [max=6].",
+            usage = "[minimo] [maximo]"
         )
 
     async def run(self, ctx, args, flags):
@@ -193,7 +182,7 @@ class CRoll(BotCommand):
         except (ValueError, AssertionError):
             raise CommandError("É preciso informar números inteiros válidos.")
 
-        return f"{randint(minv, maxv)}"
+        return str(randint(minv, maxv))
 
 class CExpressionParser(BotCommand):
     def __init__(self, bot):
@@ -209,8 +198,18 @@ class CExpressionParser(BotCommand):
         if not args:
             return self.get_usage_embed(ctx)
 
+        def callable_parse_and_evaluate():
+            p = ExpressionParser(' '.join(args))
+            tree = p.parse()
+            return tree.evaluate()
+
         try:
-            return str(ExpressionParser(' '.join(args)).parse().evaluate())
+            ret = await asyncio.get_running_loop().run_in_executor(
+                None,
+                callable_parse_and_evaluate
+            )
+
+            return str(ret)
         except ParserError as e:
             raise CommandError(f'Ocorreu um erro durante a execução do parser:\n\n`{e}`')
         except OverflowError:

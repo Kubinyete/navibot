@@ -19,7 +19,7 @@
         "bot_prefix": ";",
         "nsfw_disabled": true,
         "gst_welcome_channel_id": 0,
-        "gst_welcome_channel_message": "embed -t \"{getmember --self --display_name} {choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"}\" -d \"Olá {getmember --self --mention}, seja bem-vindo ao servidor!\" -timg \"{av \"{getmember --self --mention}\" --size=256 --url}\""
+        "gst_welcome_channel_message": "embed -t \"{getmember --self --display_name} {choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"}\" -d \"Olá {getmember --self --mention}, seja bem-vindo ao servidor!\" -timg \"{av --self --size=512 --url}\""
     },
     "modules": {
         "osu": {

@@ -12,6 +12,7 @@ import databases
 import re
 import sys
 import io
+import aiohttp
 
 from enum import Enum, auto
 
@@ -36,15 +37,29 @@ class INotifiableAsync(INotifiable):
         raise NotImplementedError()
 
 class PermissionLevel(Enum):
-    NONE = auto()
-    GUILD_MOD = auto()
-    GUILD_ADMIN = auto()
-    GUILD_OWNER = auto()
-    BOT_OWNER = auto()
+    NONE                = auto()
+    GUILD_MOD           = auto()
+    GUILD_ADMIN         = auto()
+    GUILD_OWNER         = auto()
+    BOT_OWNER           = auto()
 
-class ReactionType(Enum):
-    SUCCESS = '✅'
-    FAILURE = '❌'
+class EmojiType(Enum):
+    INFORMATION         = 'ℹ️'
+    CHECK_MARK          = '✅'
+    CROSS_MARK          = '❌'
+    WARNING             = '⚠️'
+    RED_HEART           = '❤️'
+    THUMBS_UP           = '👍'
+    THUMBS_DOWN         = '👎'
+    THINKING            = '🤔'
+    OK_HAND             = '👌'
+
+class ClientEvent(Enum):
+    READY               = 'ready'
+    MESSAGE             = 'message'
+    MEMBER_JOIN         = 'member_join'
+    REACTION_ADD        = 'reaction_add'
+    REACTION_REMOVE     = 'reaction_remove'
 
 class Context:
     def __init__(self, bot):
@@ -116,7 +131,7 @@ class BotContext(Context):
         elif isinstance(response, Slider):
             return await response.send()
 
-        elif isinstance(response, ReactionType):
+        elif isinstance(response, EmojiType):
             if not self.message:
                 raise BotError('É preciso vincular uma mensagem a este contexto para poder adicionar uma reação.')
 
@@ -124,7 +139,7 @@ class BotContext(Context):
 
         elif isinstance(response, Exception):
             embed = self.create_response_embed()
-            embed.description = f'{ReactionType.FAILURE.value} **{type(response).__name__}**: {response}'
+            embed.description = f'{EmojiType.CROSS_MARK.value} **{type(response).__name__}**: {response}'
             return await target.send(embed=embed)
 
         else:
@@ -159,7 +174,7 @@ class CliContext(Context):
             response_data = '\n'.join(response) if isinstance(response, list) else response
         elif isinstance(response, discord.Embed):
             response_data = response.description
-        elif isinstance(response, ReactionType):
+        elif isinstance(response, EmojiType):
             response_data = response.name
         elif isinstance(response, Exception):
             response_data = f'{type(response).__name__}: {response}'
@@ -198,6 +213,8 @@ class Command:
                     setattr(self, key, value)
                 else:
                     raise TypeError("É preciso informar um atributo básico com o mesmo tipo.")
+            else:
+                raise KeyError(f"O atributo {key} não pertence à um {type(self).__name__}.")
 
     async def run(self, ctx: Context, args: list, flags: dict):
         raise NotImplementedError()
@@ -246,7 +263,6 @@ class BotCommand(Command):
             return self.usermap[author.id]
 
     def get_guild_settings_manager(self):
-        assert self.bot.guildsettings
         return self.bot.guildsettings
 
     async def run(self, ctx: BotContext, args: list, flags: dict):
@@ -294,27 +310,25 @@ class ModuleHook:
         self.bot = bot
         self.binded_events_ids = []
 
-    def bind_event(self, eventname: str, coroutinefunc: callable, name: str=None):
+    def bind_event(self, eventname: ClientEvent, coroutinefunc: callable):
         self.binded_events_ids.append(
             (
                 eventname,
                 self.bot.client.register_event(
                     eventname,
-                    coroutinefunc,
-                    name=name
+                    coroutinefunc
                 )
             )
         )
 
     def clear_binded_events(self):
-        for event, eid in self.binded_events_ids:
+        for event, coroutinefunc in self.binded_events_ids:
             self.bot.client.remove_event(
                 event,
-                eid
+                coroutinefunc
             )
 
     def get_guild_settings_manager(self):
-        assert self.bot.guildsettings
         return self.bot.guildsettings
 
     def run(self):
@@ -394,46 +408,139 @@ class Client(discord.Client):
     def __init__(self):
         super().__init__()
         
-        self.listeners = {}
+        # Eventos globais, sempre ativados antes dos associados
+        self.listeners = dict()
+        # Eventos associados à uma identificação
+        self.assoc_listeners = dict()
+
+        self.assoc_allowed_events = (
+            # Pode ser associado a uma Guild ID
+            ClientEvent.MEMBER_JOIN, 
+            # Pode ser associado a um Message ID
+            ClientEvent.REACTION_ADD, 
+            # Pode ser associado a um Message ID
+            ClientEvent.REACTION_REMOVE
+        )
 
     async def on_message(self, message: discord.Message):
-        await self.dispatch_event('message', message=message)
+        await self.dispatch_event(
+            ClientEvent.MESSAGE, 
+            message=message
+        )
 
     async def on_ready(self):
-        await self.dispatch_event('ready')
+        await self.dispatch_event(
+            ClientEvent.READY
+        )
 
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
-        await self.dispatch_event('reaction_add', reaction=reaction, user=user)
+        await asyncio.gather(
+            self.dispatch_event(
+                ClientEvent.REACTION_ADD, 
+                reaction=reaction, 
+                user=user
+            ),
+            self.dispatch_assoc_event(
+                ClientEvent.REACTION_ADD,
+                str(reaction.message.id),
+                reaction=reaction, 
+                user=user
+            )
+        )
+
+    async def on_reaction_remove(self, reaction: discord.Reaction, user: discord.User):
+        await asyncio.gather(
+            self.dispatch_event(
+                ClientEvent.REACTION_REMOVE, 
+                reaction=reaction, 
+                user=user
+            ),
+            self.dispatch_assoc_event(
+                ClientEvent.REACTION_REMOVE, 
+                str(reaction.message.id),
+                reaction=reaction, 
+                user=user
+            )
+        )
 
     async def on_member_join(self, member: discord.Member):
-        await self.dispatch_event('member_join', member=member)
+        await asyncio.gather(
+            self.dispatch_event(
+                ClientEvent.MEMBER_JOIN, 
+                member=member
+            ),
+            self.dispatch_assoc_event(
+                ClientEvent.MEMBER_JOIN, 
+                str(member.guild.id),
+                member=member
+            )
+        )
 
     def listen(self, token):
         self.run(token)
 
-    def register_event(self, eventname: str, coroutinefunc: callable, name: str=None):
+    def register_event(self, eventname: ClientEvent, coroutinefunc: callable):
         assert asyncio.iscoroutinefunction(coroutinefunc)
 
-        eid = coroutinefunc.__name__ if name is None else name
+        if not eventname.value in self.listeners:
+            self.listeners[eventname.value] = list()
 
-        if not eventname in self.listeners:
-            self.listeners[eventname] = dict()
-
-        self.listeners[eventname][eid] = coroutinefunc
+        if not coroutinefunc in self.listeners[eventname.value]:
+            self.listeners[eventname.value].append(coroutinefunc)
+        else:
+            raise KeyError(f'A callback {coroutinefunc.__name__} já está atribuida ao evento {eventname.name}.')
         
-        return eid
+        return coroutinefunc
 
-    def remove_event(self, eventname: str, eid: str):
-        del self.listeners[eventname][eid]
+    def register_assoc_event(self, eventname: ClientEvent, coroutinefunc: callable, identity: str):
+        assert eventname in self.assoc_allowed_events
+        assert asyncio.iscoroutinefunction(coroutinefunc)
+        assert identity
 
-    async def dispatch_event(self, eventname: str, **kwargs):
-        if not eventname in self.listeners:
-            return
+        if not eventname.value in self.assoc_listeners:
+            self.assoc_listeners[eventname.value] = dict()
 
-        for coroutine in self.listeners[eventname].values():
-            asyncio.create_task(
-                coroutine(kwargs)
-            )
+        assoc = self.assoc_listeners[eventname.value]
+
+        if not identity in assoc:
+            assoc[identity] = list()
+
+        assoc[identity].append(coroutinefunc)
+                
+        return identity
+
+    def remove_event(self, eventname: ClientEvent, coroutinefunc: callable):
+        self.listeners[eventname.value].remove(coroutinefunc)
+        
+        if not self.listeners[eventname.value]:
+            del self.listeners[eventname.value]
+
+    def remove_assoc_event(self, eventname: ClientEvent, identity: str, coroutinefunc: callable=None):
+        if coroutinefunc:
+            self.assoc_listeners[eventname.value][identity].remove(coroutinefunc)
+        else:
+            del self.assoc_listeners[eventname.value][identity]
+
+        if not self.assoc_listeners[eventname.value]:
+            del self.assoc_listeners[eventname.value]
+
+    async def dispatch_event(self, eventname: ClientEvent, **kwargs):
+        try:
+            for coroutine in self.listeners[eventname.value]:
+                asyncio.create_task(
+                    coroutine(kwargs)
+                )
+        except KeyError:
+            pass
+
+    async def dispatch_assoc_event(self, eventname: ClientEvent, identity: str, **kwargs):
+        try:
+            for coroutine in self.assoc_listeners[eventname.value][identity]:
+                asyncio.create_task(
+                    coroutine(kwargs)
+                )
+        except KeyError:
+            pass
 
 class Config:
     def __init__(self, configfile: str):
@@ -527,15 +634,17 @@ class HooksManager:
         assert not self.hooks
 
 class Bot:
-    def __init__(self, path: str=None, logfile: str=None, loglevel=logging.DEBUG):
-        logging.basicConfig(
-            filename=logfile, 
-            format="[%(asctime)s] <%(levelname)s> %(message)s", 
-            datefmt="%d/%m/%Y %H:%M:%S", 
-            level=loglevel
-        )
+    def __init__(self, path: str=None, logenable: bool=True, logfile: str=None, loglevel=logging.DEBUG):
+        # Log básico, não queremos nada fancy
+        if logenable:
+            logging.basicConfig(
+                filename=logfile, 
+                format="[%(asctime)s] <%(levelname)s> %(message)s", 
+                datefmt="%d/%m/%Y %H:%M:%S", 
+                level=loglevel
+            )
 
-        # Caminho base do bot, é utilizado como referência para procurar modulos
+        # Se não recebermos por parametro um caminho, tente nós mesmos descobrir isso
         self.curr_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if not path else path
 
         # Nosso objeto para carregar valores do arquivo de configurações
@@ -543,27 +652,23 @@ class Bot:
             f'{self.curr_path}/release/config.json'
         )
 
+        # Prepara as configs
         self.config.load()
+        # Prepara o client
         self.client = Client()
-
-        # Prepara o handler para receber comandos em mensagens
-        self.client.register_event(
-            'message', 
-            self.receive_message
-        )
-        
-        # Vai efetuar inicializações
-        self.client.register_event(
-            'ready', 
-            self.receive_ready
-        )
 
         # Dicionário de comandos
         self.commands = CommandsManager(self)
         self.clicommands = CommandsManager(self)
-
         # Lista de hooks acoplados
         self.hooks = HooksManager(self)
+
+        # Objeto de conexão de banco de dados ativo no momento.
+        self.active_database = None
+        # Objeto de sessão ativa no momento.
+        self.active_http_session = None
+        # Intervalo que fica rodando de fundo para a troca de atividades.
+        self.playing_interval = None
 
         # Servidor de CLI rodando no fundo para aceitar conexões vindas do localhost
         self.connection_manager = ConnectionManager(
@@ -572,20 +677,30 @@ class Bot:
             self.config.get('connections.port', 7777)
         ) if self.config.get('connections.enable', False) else None
 
-        # Inicialização de tudo
-        self.load_all_modules()
-
         # Nosso gerênciador de variáveis por Guild.
         self.guildsettings = GuildSettingsManager(
             self, 
             self.config.get('guild_settings', {})
         )
 
-        # Objeto de conexão de banco de dados ativo no momento.
-        self.active_database = None
+        # Acoplha nativamente os eventos necessários
+        self.register_native_events()
 
-        # Intervalo que fica rodando de fundo para a troca de atividades.
-        self.playing_interval = None
+        # Inicialização de tudo
+        self.load_all_modules()
+
+    def register_native_events(self):
+        # Prepara o handler para receber comandos em mensagens
+        self.client.register_event(
+            ClientEvent.MESSAGE,
+            self.receive_message
+        )
+        
+        # Vai efetuar inicializações após READY
+        self.client.register_event(
+            ClientEvent.READY, 
+            self.receive_ready
+        )
 
     def load_all_modules(self, is_reloading: bool=False):
         if is_reloading:
@@ -671,11 +786,19 @@ class Bot:
 
         await self.client.close()
 
+    def get_http_session(self):
+        if not self.active_http_session:
+            self.active_http_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self.config.get('global.http_session_timeout', 30))
+            )
+
+        return self.active_http_session
+
     async def get_database_connection(self):
         # @NOTE:
         # Exception rara, aonde conectamos 2 vezes no banco ao mesmo tempo
         # devido a falta da trava!!!
-        async with asyncio.Lock() as lock:
+        async with asyncio.Lock():
             if not self.active_database:
                 self.active_database = databases.Database(
                     self.config.get('database.connection_string')
@@ -848,14 +971,14 @@ class Bot:
                 if 'resetprefix' in ctx.message.content:
                     try:
                         if await self.reset_bot_prefix(ctx):
-                            await ctx.reply(ReactionType.SUCCESS)
+                            await ctx.reply(EmojiType.CHECK_MARK)
                         else:
-                            await ctx.reply(ReactionType.FAILURE)
+                            await ctx.reply(EmojiType.CROSS_MARK)
                     except PermissionLevelError as e:
                         await ctx.reply(e)
                     except Exception as e:
                         logging.exception(f'RECEIVE_MESSAGE: {type(e).__name__}: {e}')
-                        await ctx.reply(ReactionType.FAILURE)
+                        await ctx.reply(EmojiType.CROSS_MARK)
                 else:
                     await ctx.reply(f'Por acaso esqueceu o prefixo do bot para esta Guild?\n\nO prefixo atual está configurado para `{prefix}`\n\nPara voltar o prefixo ao padrão, mencione o bot novamente com a palavra `resetprefix`.')
 
@@ -872,13 +995,19 @@ class Bot:
         return await self.handle_command_parse(ctx, content, resolve_subcommands=False, alternative_target_commands=self.clicommands)
 
     async def handle_command_parse(self, ctx: Context, content: str, resolve_subcommands: bool=True, alternative_target_commands: CommandsManager=None):
-        parser = CommandParser(
-            content,
-            resolve_subcommands
-        )
- 
+        def callable_parse_pipeline():
+            parser = CommandParser(
+                content,
+                resolve_subcommands
+            )
+
+            return parser.parse()
+            
         try:
-            pipeline = parser.parse()
+            pipeline = await asyncio.get_running_loop().run_in_executor(
+                None,
+                callable_parse_pipeline
+            )
 
             output = await self.handle_pipeline_execution(
                 self.commands if not alternative_target_commands else alternative_target_commands, 
@@ -903,6 +1032,16 @@ class Bot:
 
                 if is_instance(handler, BotCommand) and not self.has_permission_level(handler.permissionlevel, ctx):
                     raise PermissionLevelError(f"Você não possui um nível de permissão igual ou superior à `{handler.permissionlevel.name}`")
+
+                # @TODO:
+                # Isso está muito difícil para ler e compreender
+                # Tentar separar esse processo em outros pedaços
+                # @NOTE:
+                # Isso faz o seguinte, dada uma estrutura de "PIPELINE" voltada por CommandParser.parse()
+                # você vai fazendo a resolução de cada argumento que for outroa PIPELINE, tentando
+                # resolver isso para uma string comum utilizada de argumento para o comando inferior.
+                # Essa função também trata da passagem de um output para ser utilizado de input para
+                # o próximo comando.
 
                 args = command.args
                 flags = command.flags
@@ -931,10 +1070,6 @@ class Bot:
 
                         # Retorne todos os pedaços a um só argumento string único.
                         args[c] = ''.join(arg)
-
-                # Se estamos prestes a passar uma saída de outro comando na PIPELINE para este atual, precisa ser um tipo válido.
-                # if not isinstance(pipeline_output, str) and not isinstance(pipeline_output, list):
-                #    raise BotError(f"O comando `{command.cmd}` recebeu uma saída inválida, abortando...")
                 
                 # Continue o processamento da PIPELINE.
                 pipeline_output = await self.handle_command_execution(
@@ -1028,7 +1163,7 @@ class HConnectionManager(ModuleHook):
 
     def run(self):
         self.bind_event(
-            'message',
+            ClientEvent.MESSAGE,
             self.callable_transmit_message
         )
 
@@ -1246,7 +1381,7 @@ class ConnectionManager(INotifiable):
         }
 
 class GuildSettingsManager:
-    def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=600):
+    def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=60 * 30):
         self.bot = bot
         self.default_values = default_values
         self.guildmap = {}
@@ -1377,18 +1512,16 @@ class Slider:
 
     def get_current_item(self):
         cpy = self.items[self.current_index].copy()
-
         cpy.set_footer(text=f"{cpy.footer.text} <{self.current_index + 1}/{len(self.items)}>", icon_url=cpy.footer.icon_url)
-        
         return cpy
 
     async def callable_on_add_reaction(self, kwargs):
+        assert self.sent_message and self.registered_event_id
+
         reaction = kwargs['reaction']
         user = kwargs['user']
 
-        assert self.sent_message and self.registered_event_id
-
-        if reaction.message.id != self.sent_message.id or user == self.bot.client.user or (self.restricted and user != self.ctx.author):
+        if user == self.bot.client.user or (self.restricted and user != self.ctx.author):
             return
 
         if reaction.emoji == self.reaction_right:
@@ -1406,8 +1539,8 @@ class Slider:
             self.caught_exception = e
         finally:
             if self.caught_exception:
-                self.bot.client.remove_event(
-                    "reaction_add", 
+                self.bot.client.remove_assoc_event(
+                    ClientEvent.REACTION_ADD,
                     self.registered_event_id
                 )
             else:
@@ -1425,10 +1558,10 @@ class Slider:
             if len(self.items) == 1:
                 return
             else:
-                self.registered_event_id = self.bot.client.register_event(
-                    'reaction_add', 
-                    self.callable_on_add_reaction, 
-                    name=f'slider_send_{self.sent_message.id}'
+                self.registered_event_id = self.bot.client.register_assoc_event(
+                    ClientEvent.REACTION_ADD, 
+                    self.callable_on_add_reaction,
+                    str(self.sent_message.id)
                 )
 
             await asyncio.gather(
@@ -1437,13 +1570,12 @@ class Slider:
             )
 
             self.last_activity = time.time()
-
             while time.time() - self.last_activity <= self.timeout:
                 await asyncio.sleep(self.timeout)
 
             if not self.caught_exception:
-                self.bot.client.remove_event(
-                    "reaction_add", 
+                self.bot.client.remove_assoc_event(
+                    ClientEvent.REACTION_ADD,
                     self.registered_event_id
                 )
                 

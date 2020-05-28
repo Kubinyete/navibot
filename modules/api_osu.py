@@ -16,7 +16,8 @@ class COsu(BotCommand):
         )
 
         self.api = OsuApi(
-            self.bot.config.get('modules.osu.key')
+            self.bot.config.get('modules.osu.key'),
+            aiohttpSession=self.bot.get_http_session()
         )
 
         self.assets_domain = r"https://a.ppy.sh"
@@ -44,7 +45,7 @@ class COsu(BotCommand):
             user = user[0]
             items = []
 
-            profile_embed = self.create_response_embed(message)
+            profile_embed = message.create_response_embed()
             profile_embed.title = user['username']
             profile_embed.description = f"**#{user['pp_rank']}** (:flag_{user['country'].lower()}: **#{user['pp_country_rank']}**)"
             profile_embed.url = f"{self.api.domain}/u/{user['user_id']}"
@@ -66,7 +67,7 @@ class COsu(BotCommand):
                 beatmap = score['beatmap']
                 beatmapset = score['beatmapset']
 
-                embed = self.create_response_embed(message)
+                embed = message.create_response_embed()
                 embed.title = f"{beatmapset['title']} por {beatmapset['artist']} [{beatmap['version']}]"
                 embed.url = beatmap['url']
                 embed.set_image(url=beatmapset['covers']['card'])
