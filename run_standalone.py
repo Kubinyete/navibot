@@ -16,4 +16,4 @@ if __name__ == "__main__":
         loglevel=logging.INFO
     )
     
-    bot.listen()
+    bot.start()

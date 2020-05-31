@@ -42,6 +42,14 @@
 - [ ] divorce @Usuario
 
 - [ ] profile [@Usuario]
+    Um perfil deve ser vinculado somente à uma Guild, ou deve ser global?
+        Vamos inicialmente testar um perfil para cada Guild, pois ai podemos customizar a experiência do perfil para cada Guild.
+    Suporte à imagens de fundo (capa de perfil)?
+        Sim. Limite max. de 128 KB por membro, o bot fica responsável pela diminuição da imagem (geração de versão de miniatura).
+        Lembrete: Limite de uma imagem attachment é 400x300.
+        Suporte a links de outras contas? Faz mais sentido para links de coisas não tão mainstream (Ex: Osu)
+            Osu, Steam, Twitter, Facebook?
+    NOTE: Não consegui implementar isso de forma fácil, tive problemas com o MySQL, troquei a biblioteca para o aiomysql e usando pool de conexão, mas mesmo assim há conflitos de transações entre os updates no EXP do usuário... O modulo opt_progression foi desativado por enquanto.
 - [ ] credits [@Usuario]
 - [ ] exp [@Usuario]
 - [ ] givecredits amount [@Usuario]

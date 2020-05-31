@@ -2,10 +2,16 @@ import discord
 import asyncio
 import logging
 import aiohttp
+import io
+import math
+import PIL.Image
+import PIL.ImageFont
+import PIL.ImageDraw
 
 from navibot.client import BotCommand, InterpretedCommand, PermissionLevel, EmojiType
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
+from navibot.util import bytes_string, normalize_image_size
 
 class CSetAvatar(BotCommand):
     def __init__(self, bot):
@@ -101,8 +107,7 @@ class CGuildVariables(BotCommand):
         )
 
     async def run(self, ctx, args, flags):
-        gsm = self.get_guild_settings_manager()
-        gvars = await gsm.get_all_guild_variables(ctx.channel.guild.id)
+        gvars = await self.bot.guildsettings.get_all_guild_variables(ctx.channel.guild.id)
 
         if 'list' in flags:
             text = ''
@@ -121,7 +126,7 @@ class CGuildVariables(BotCommand):
 
             if 'reset' in flags:
                 try:
-                    if await gsm.remove_guild_variable(expected_variable):
+                    if await self.bot.guildsettings.remove_guild_variable(expected_variable):
                         return EmojiType.CHECK_MARK
                     else:
                         return EmojiType.CROSS_MARK
@@ -139,7 +144,7 @@ class CGuildVariables(BotCommand):
                         raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
 
                     try:
-                        if await gsm.update_guild_variable(expected_variable):
+                        if await self.bot.guildsettings.update_guild_variable(expected_variable):
                             return EmojiType.CHECK_MARK
                         else:
                             expected_variable.set_value(prev_value)

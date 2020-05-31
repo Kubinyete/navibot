@@ -1,3 +1,5 @@
+import math
+
 from enum import Enum, auto
 
 class VariableType(Enum):
@@ -37,3 +39,27 @@ class GuildVariable:
 
     def get_value(self):
         return self.value
+
+class MemberInfo:
+    def __init__(self, guildid: int, userid: int, exp: int, profile_cover: bytes):
+        self.guildid = guildid
+        self.userid = userid
+        self.exp = exp
+        self.profile_cover = profile_cover
+
+    @staticmethod
+    def get_level_from_exp(exp: int):
+        return math.floor(math.sqrt(2) * math.sqrt(exp) / 10.0)
+
+    @staticmethod
+    def get_exp_required_for_level(level: int):
+        return int(50 * math.pow(level, 2))
+
+    def get_current_level(self):
+        return self.get_level_from_exp(self.exp)
+
+    def get_required_for_next_level(self):
+        return self.get_exp_required_for_level(self.get_current_level() + 1) - self.exp
+
+    def has_profile_cover(self):
+        return self.profile_cover is not None

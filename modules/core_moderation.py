@@ -16,8 +16,7 @@ class CNsfw(BotCommand):
         )
 
     async def run(self, ctx, args, flags):
-        gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'nsfw_disabled')
+        var = await self.bot.guildsettings.get_guild_variable(ctx.channel.guild.id, 'nsfw_disabled')
 
         if var:
             if 'enable' in flags or 'e' in flags: 
@@ -28,7 +27,7 @@ class CNsfw(BotCommand):
                 return f"Conteúdo NSFW está atualmente **{'desabilitado' if var.get_value() else 'habilitado'}** para esta Guild."
 
             try:
-                if await gsm.update_guild_variable(var):
+                if await self.bot.guildsettings.update_guild_variable(var):
                     return EmojiType.CHECK_MARK
                 else:
                     return EmojiType.CROSS_MARK
@@ -57,8 +56,7 @@ class CSetWelcomeChannel(BotCommand):
         if not channel and (not 'disable' in flags and not 'd' in flags): 
             return self.get_usage_embed(ctx)
 
-        gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'gst_welcome_channel_id')
+        var = await self.bot.guildsettings.get_guild_variable(ctx.channel.guild.id, 'gst_welcome_channel_id')
 
         if var:
             if 'disable' in flags or 'd' in flags:
@@ -67,7 +65,7 @@ class CSetWelcomeChannel(BotCommand):
                 var.set_value(channel.id)
 
             try:
-                if await gsm.update_guild_variable(var):
+                if await self.bot.guildsettings.update_guild_variable(var):
                     return EmojiType.CHECK_MARK
                 else:
                     return EmojiType.CROSS_MARK
@@ -91,8 +89,7 @@ class CSetWelcomeMessage(BotCommand):
         if not args: 
             return self.get_usage_embed(ctx)
 
-        gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'gst_welcome_channel_message')
+        var = await self.bot.guildsettings.get_guild_variable(ctx.channel.guild.id, 'gst_welcome_channel_message')
 
         if var:
             cmd = ' '.join(args)
@@ -100,7 +97,7 @@ class CSetWelcomeMessage(BotCommand):
             var.set_value(cmd)
 
             try:
-                if await gsm.update_guild_variable(var):
+                if await self.bot.guildsettings.update_guild_variable(var):
                     return EmojiType.CHECK_MARK
                 else:
                     return EmojiType.CROSS_MARK
@@ -140,14 +137,13 @@ class CSetPrefix(BotCommand):
         if not args or len(args[0]) < 1:
             return self.get_usage_embed(ctx)
 
-        gsm = self.get_guild_settings_manager()
-        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
+        var = await self.bot.guildsettings.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
 
         if var:
             var.set_value(args[0])
 
             try:
-                if await gsm.update_guild_variable(var):
+                if await self.bot.guildsettings.update_guild_variable(var):
                     return EmojiType.CHECK_MARK
                 else:
                     return EmojiType.CROSS_MARK
@@ -162,11 +158,9 @@ class HWelcomeMessage(ModuleHook):
     async def callable_receive_member_join(self, kwargs):
         member = kwargs.get('member')
 
-        gsm = self.get_guild_settings_manager()
-
         vc, vm = await asyncio.gather(
-            gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
-            gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
+            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
         )
 
         if vc and vc.get_value() and vm and vm.get_value():

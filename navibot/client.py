@@ -8,11 +8,12 @@ import importlib
 import inspect
 import time
 import traceback
-import databases
 import re
 import sys
 import io
 import aiohttp
+# import databases
+import aiomysql
 
 from enum import Enum, auto
 
@@ -23,17 +24,19 @@ from navibot.database.dal import GuildVariableDAL
 from navibot.database.models import GuildVariable
 
 class INotifiable:
+    # @NOTE: reload de forma blocking, pos não estamos interessados
+    # em rodar outros códigos enquanto acontece o reload, não faz sentido.
     def notify_reload(self):
         raise NotImplementedError()
 
+    # @NOTE: shutdown de forma blocking, pos não estamos interessados
+    # em rodar outros códigos enquanto acontece o desligamento, não faz sentido.
     def notify_shutdown(self):
         raise NotImplementedError()
 
-class INotifiableAsync(INotifiable):
-    async def notify_reload(self):
-        raise NotImplementedError()
-    
-    async def notify_shutdown(self):
+    # @NOTE: ready pode acontecer várias vezes durante a execução, e não há mudança na estrutura
+    # do bot durante isto, portanto, deve ser uma coroutine.
+    async def notify_ready(self):
         raise NotImplementedError()
 
 class PermissionLevel(Enum):
@@ -106,6 +109,10 @@ class BotContext(Context):
                 else:
                     return atch
 
+    # @NOTE:
+    # Atualmente, nós esperamos sempre que um comando volte uma reply, mas nunca uma combinação, Ex: Attachment +
+    # Texto de mensagem. Ou seja, se um comando for enviar duas coisas, terá que ser duas chamadas para reply()
+    # separadas.
     async def reply(self, response, use_embed_as_default: bool=True):
         if not self.channel and not self.author:
             raise BotError('Não é possível responder o contexto atual, não existe nenhum canal ou usuário selecionado.')
@@ -233,7 +240,7 @@ class Command:
         )
 
 class BotCommand(Command):
-    # @TODO:
+    # @NOTE:
     # Parar de usar enable_usermap, pensar em uma outra forma de possuir uma "memória volátil"
     # para os comandos usarem dependendo do contexto
     def __init__(self, bot, permissionlevel: PermissionLevel=PermissionLevel.NONE, hidden: bool=False, enable_usermap: bool=False, **kwargs):
@@ -262,9 +269,6 @@ class BotCommand(Command):
             self.usermap[author.id] = list()
             return self.usermap[author.id]
 
-    def get_guild_settings_manager(self):
-        return self.bot.guildsettings
-
     async def run(self, ctx: BotContext, args: list, flags: dict):
         raise NotImplementedError()
 
@@ -286,7 +290,7 @@ class InterpretedCommand(BotCommand):
 
         self.command = command
 
-    async def run(self, ctx: BotContext, args: list, flags: dict):
+    async def run_command(self, command: str, ctx: BotContext, args: list, flags: dict):
         p = CommandParser(self.command)
         pipeline = p.parse()
 
@@ -294,11 +298,19 @@ class InterpretedCommand(BotCommand):
         # os parâmetros activator_args e activator_flags são preservados pois
         # apontam para os args e flags originais recebidos pelo comando interpretado.
         return await self.bot.handle_pipeline_execution(
-            self.bot.commands,
+            command,
             ctx,
             pipeline,
             activator_args=args,
             activator_flags=flags
+        )
+
+    async def run(self, ctx: BotContext, args: list, flags: dict):
+        return await self.run_command(
+            self.bot.commands,
+            ctx,
+            args,
+            flags
         )
 
 class CommandAlias:
@@ -328,14 +340,8 @@ class ModuleHook:
                 coroutinefunc
             )
 
-    def get_guild_settings_manager(self):
-        return self.bot.guildsettings
-
     def run(self):
         raise NotImplementedError()
-
-    def destroy(self):
-        self.clear_binded_events()
 
 class TimeoutContext:
     def __init__(self, waitfor: int, callable: callable, callback: callable=None, **kwargs):
@@ -624,7 +630,7 @@ class HooksManager:
     def unregister_hook(self, hook):
         assert is_instance(hook, ModuleHook)
         self.hooks.remove(hook)
-        hook.destroy()
+        hook.clear_binded_events()
 
     def clear(self):
         # Reversed, pois estamos excluindo enquanto estamos iterando
@@ -633,9 +639,337 @@ class HooksManager:
 
         assert not self.hooks
 
+class GuildSettingsManager:
+    def __init__(self, bot, default_values: dict={}, cache_timelimit: int=60 * 30):
+        self.bot = bot
+        self.default_values = default_values
+        self.guildmap = {}
+        self.cache_timelimit = cache_timelimit
+
+    async def get_cacheable_guild_variable(self, guildid: int, key: str):
+        # @NOTE:
+        # Utilizando um sistema de "lazy load", aonde as variáveis vão sendo guardadas em memória a medida que são requisitadas
+        # para cada variavel existe um tempo de cache, se ele expirar, podemos pensar em 2 alterantivas:
+        # 1. Retirar da memória a variavel (pois assumimos que a Guild não usará ela por um bom tempo)
+        # 2. Deixar em memória, porém uma nova requisição que chegar, forçará a sua atualização com base no banco de dados (comportamento atual).
+        # para meio estranho não liberar memória, mas escrever um gerenciador para retirar da memória parece uma tarefa um pouco mais complicada.
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            dal = GuildVariableDAL(conn)
+
+            if not guildid in self.guildmap:
+                self.guildmap[guildid] = {}
+
+            if key in self.guildmap[guildid] and time.time() - self.guildmap[guildid][key].fetched_at < self.cache_timelimit:
+                currvar = self.guildmap[guildid][key]
+            else:
+                currvar = await dal.get_variable(guildid, key)
+
+                if currvar:
+                    currvar.fetched_at = time.time()
+                    self.guildmap[guildid][key] = currvar
+
+            return currvar
+        
+    async def get_guild_variable(self, guildid: int, key: str):
+        var = await self.get_cacheable_guild_variable(guildid, key)
+
+        if not var:
+            default = self.default_values.get(key, None)
+
+            if default != None:
+                var = GuildVariable( 
+                    guildid,
+                    key,
+                    default,
+                    None
+                )
+
+        return var
+
+    async def get_all_guild_variables(self, guildid: int):
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            dal = GuildVariableDAL(conn)
+
+            if not guildid in self.guildmap:
+                self.guildmap[guildid] = {}
+
+            tm = time.time()
+            for var in await dal.get_all_variables(guildid):
+                var.fetched_at = tm
+                self.guildmap[guildid][var.key] = var
+
+            dictview = dict(self.guildmap[guildid])
+            for key, value in self.default_values.items():
+                if not key in dictview:
+                    dictview[key] = GuildVariable( 
+                        guildid,
+                        key,
+                        value,
+                        None
+                    )
+
+            return dictview
+
+    async def update_guild_variable(self, variable: GuildVariable):
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            dal = GuildVariableDAL(conn)
+
+            if variable.key in self.guildmap[variable.guildid]:
+                # Já temos no banco
+                return await dal.update_variable(variable)
+            else:
+                ok = await dal.create_variable(variable)
+
+                if ok:
+                    self.guildmap[variable.guildid][variable.key] = variable
+                    variable.fetched_at = time.time()
+
+                return ok
+
+    async def remove_guild_variable(self, variable: GuildVariable):
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            dal = GuildVariableDAL(conn)
+
+            ok = await dal.remove_variable(variable)
+
+            if ok and variable.key in self.guildmap[variable.guildid]:
+                del self.guildmap[variable.guildid][variable.key]
+
+            return ok
+
+class HConnectionManager(ModuleHook):
+    def __init__(self, bot, connection_pool: list):
+        super().__init__(bot)
+        self.connection_pool = connection_pool
+
+    def run(self):
+        self.bind_event(
+            ClientEvent.MESSAGE,
+            self.callable_transmit_message
+        )
+
+    async def callable_transmit_message(self, kwargs):
+        message = kwargs.get('message')
+
+        # Só aceita mensagens por privado ou de um canal de texto
+        if not (isinstance(message.channel, discord.TextChannel) or isinstance(message.channel, discord.DMChannel)):
+            return
+
+        # Para cada conexão, enviar a mensagem
+        for cliconn in self.connection_pool:
+            asyncio.create_task(
+                cliconn.write_packet(
+                    {
+                        'type': 'message',
+                        'data': {
+                            'channel': {'id': message.channel.id, 'name': message.channel.name} if message.channel and isinstance(message.channel, discord.TextChannel) else None,
+                            'message': {'id': message.id,'content': message.content},
+                            'author': {'id': message.author.id,'name': message.author.name}
+                        }
+                    }
+                )
+            )
+
+class CliConnection:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, bot_context: BotContext):
+        self.reader = reader
+        self.writer = writer
+        self.peername = writer.get_extra_info("peername")
+
+        self.bot_context = bot_context
+
+    async def read_data(self):
+        if not self.writer.is_closing():
+            return await self.reader.readline()
+
+    async def write_packet(self, packet: dict):
+        if not self.writer.is_closing():
+            logging.info(f'write_packet: Sending packet {packet} to {self.peername}')
+
+            self.writer.write(
+                (json.dumps(packet) + '\n').encode('utf-8')
+            )
+
+            await self.writer.drain()
+
+    async def wait_closed(self):
+        await self.writer.wait_closed()
+
+    def close(self):
+        assert self.writer.can_write_eof()
+
+        if not self.writer.is_closing():
+            self.writer.write_eof()
+            self.writer.close()
+
+    def is_closing(self):
+        return self.writer.is_closing()
+
+    def at_eof(self):
+        return self.reader.at_eof()
+
+class ConnectionManager(INotifiable):
+    def __init__(self, bot, listen: str, port: int):
+        self.bot = bot
+        self.host = listen
+        self.port = port
+        self.open_server = None
+
+        self.bot_hook = None
+
+        self.handlers = {
+            "command_request": self.handle_command_request
+        }
+        
+        self.active_connections = []
+
+    def notify_reload(self):
+        if self.is_accepting_connections():
+            assert self.bot_hook
+            self.bot_hook = None
+            
+            # O bot recebeu um reload, portato, nosso hook de mensagens caiu!
+            self.hook_required_events()
+
+    def notify_shutdown(self):
+        if self.is_accepting_connections():
+            self.close_all_active_connections()
+
+    async def notify_ready(self):
+        pass
+
+    def close_all_active_connections(self):
+        for conn in self.active_connections:
+            conn.close()
+
+    def is_accepting_connections(self):
+        return self.open_server != None
+
+    def hook_required_events(self):
+        assert self.bot.hooks
+        assert not self.bot_hook
+
+        self.bot_hook = HConnectionManager(
+            self.bot,
+            self.active_connections
+        )
+
+        self.bot.hooks.register_hook(self.bot_hook)
+
+    def unhook_required_events(self):
+        assert self.bot.hooks
+        assert self.bot_hook
+
+        self.bot.hooks.unregister_hook(self.bot_hook)
+
+    async def start(self):
+        assert not self.open_server
+
+        try:
+            self.open_server = await asyncio.start_server(
+                self.callable_receive_connection,
+                self.host,
+                self.port,
+                start_serving=True
+            )
+        except Exception:
+            logging.info(f'ConnectionManager could not start server, aborting...')
+            return
+
+        self.hook_required_events()
+
+    async def callable_receive_connection(self, reader, writer):
+        peername = writer.get_extra_info("peername")
+
+        logging.info(f'callable_receive_connection: Received new connection from {peername}')
+
+        # Encapsule essa conexão em um objeto, para outros objetos (ModuleHook) tenham acesso por fora
+        cliconn = CliConnection(
+            reader,
+            writer,
+            # Contexto do bot para que seja possível entender se é possível mandar uma mensagem em um canal de texto ou DM, etc...
+            # É persistente durante toda a conexão, só será removido da memória quando o cliente desconectar
+            BotContext(
+                self.bot
+            )
+        )
+
+        self.active_connections.append(cliconn)
+
+        data = await cliconn.read_data()
+        while data and not (cliconn.at_eof() or cliconn.is_closing()):
+            json_packet = None
+
+            try:
+                json_packet = json.loads(data)
+            except Exception:
+                logging.info('callable_receive_connection: Failed to parse json_packet')
+
+            if json_packet:
+                response = await self.handle_received_packet(json_packet, cliconn.bot_context)
+
+                if response:
+                    await cliconn.write_packet(response)
+
+            data = await cliconn.read_data()
+
+        if not cliconn.is_closing():
+            cliconn.close()
+
+        await cliconn.wait_closed()
+
+        self.active_connections.remove(cliconn)
+
+        logging.info(f'callable_receive_connection: Closing connection for {peername}')
+
+    async def handle_received_packet(self, packet, persistent_bot_context: BotContext):
+        # Packet em JSON:
+        # {
+        #     "type": "command_request",
+        #     "data": "echo teste 1 2 3"
+        # }
+
+        type = packet.get('type', None)
+        data = packet.get('data', None)
+
+        if type and type in self.handlers:
+            if not data:
+                logging.warn(f'handle_received_packet: Received packet without data')
+            
+            return await self.handlers[type](data, persistent_bot_context)
+        else:
+            logging.info(f'handle_received_packet: Received unknown packet type: {type}')
+
+    async def handle_command_request(self, data, persistent_bot_context: BotContext):
+        # Arg data pode ser um dict ou uma string ou até mesmo None
+        logging.info(f'handle_command_request: Trying to handle command request for data: {data}')
+        
+        if not data:
+            return
+
+        current_context = CliContext(
+            self.bot,
+            data,
+            io.StringIO(),
+            persistent_bot_context
+        )
+
+        await self.bot.handle_cli_command_parse(
+            current_context,
+            data
+        )
+
+        return {
+            "type": "command_response",
+            "data": current_context.extract_output_data()
+        }
+
 class Bot:
     def __init__(self, path: str=None, logenable: bool=True, logfile: str=None, loglevel=logging.DEBUG):
-        # Log básico, não queremos nada fancy
+        # Se não recebermos por parametro um caminho, tente nós mesmos descobrir isso
+        self.curr_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if not path else path
+
+        # Log básico, não queremos nada "fancy"
         if logenable:
             logging.basicConfig(
                 filename=logfile, 
@@ -644,69 +978,69 @@ class Bot:
                 level=loglevel
             )
 
-        # Se não recebermos por parametro um caminho, tente nós mesmos descobrir isso
-        self.curr_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) if not path else path
+        # Nosso objeto para carregar valores do arquivo de configurações
+        self.config = Config(f'{self.curr_path}/release/config.json')
 
-        # Nosso objeto para carregar valores do arquivo de configurações
-        self.config = Config(
-            f'{self.curr_path}/release/config.json'
-        )
-
-        # Prepara as configs
+        # Prepara as configs e o client
         self.config.load()
-        # Prepara o client
         self.client = Client()
 
-        # Dicionário de comandos
+        # @NOTE: Componentes essenciais
+        # Dicionário de comandos, lista de hooks e gerênciador de variáveis
+        # Nosso gerênciador de variáveis por Guild.
         self.commands = CommandsManager(self)
         self.clicommands = CommandsManager(self)
-        # Lista de hooks acoplados
         self.hooks = HooksManager(self)
+        self.guildsettings = GuildSettingsManager(self, self.config.get('guild_settings', {}))
 
         # Objeto de conexão de banco de dados ativo no momento.
-        self.active_database = None
+        self.connection_pool = None
         # Objeto de sessão ativa no momento.
         self.active_http_session = None
         # Intervalo que fica rodando de fundo para a troca de atividades.
         self.playing_interval = None
+        # Lista de componentes que devem ser informados durante um desligamento ou reload do bot
+        self.notification_targets = list()
 
+        # @NOTE: Componentes opcionais
         # Servidor de CLI rodando no fundo para aceitar conexões vindas do localhost
-        self.connection_manager = ConnectionManager(
-            self,
-            self.config.get('connections.listen', '127.0.0.1'),
-            self.config.get('connections.port', 7777)
-        ) if self.config.get('connections.enable', False) else None
+        self.connection_manager = None
+        if self.config.get('connections.enable', False):
+            self.connection_manager = ConnectionManager(
+                self,
+                self.config.get('connections.listen', '127.0.0.1'),
+                self.config.get('connections.port', 7777)
+            )
 
-        # Nosso gerênciador de variáveis por Guild.
-        self.guildsettings = GuildSettingsManager(
-            self, 
-            self.config.get('guild_settings', {})
-        )
+            self.notification_targets.append(self.connection_manager)
 
-        # Acoplha nativamente os eventos necessários
+        # @NOTE: Rotinas de inicialização
+        # Acoplha nativamente os eventos necessários e carrega todos os modulos
         self.register_native_events()
-
-        # Inicialização de tudo
         self.load_all_modules()
 
+    def notify_internal_reload(self):
+        # Caso tenhamos objetos que precisam verificar algo após um reload, como é o caso do nosso ConnectionManager
+        # notifique os mesmos...
+        for notification_target in self.notification_targets:
+            notification_target.notify_reload()
+
+    def notify_internal_shutdown(self):
+        for notification_target in self.notification_targets:
+            notification_target.notify_shutdown()
+
+    async def notify_internal_ready(self):
+        for notification_target in self.notification_targets:
+            await notification_target.notify_ready()
+
     def register_native_events(self):
-        # Prepara o handler para receber comandos em mensagens
-        self.client.register_event(
-            ClientEvent.MESSAGE,
-            self.receive_message
-        )
-        
-        # Vai efetuar inicializações após READY
-        self.client.register_event(
-            ClientEvent.READY, 
-            self.receive_ready
-        )
+        self.client.register_event(ClientEvent.MESSAGE, self.callable_receive_message)
+        self.client.register_event(ClientEvent.READY, self.callable_receive_ready)
 
     def load_all_modules(self, is_reloading: bool=False):
         if is_reloading:
             self.commands.clear()
             self.hooks.clear()
-
             # Notifica todos os componentes que precisam, que está acontecendo um reload
             self.notify_internal_reload()
 
@@ -762,57 +1096,46 @@ class Bot:
         self.config.load()
         self.load_all_modules(True)
 
-    def notify_internal_reload(self):
-        # Caso tenhamos objetos que precisam verificar algo após um reload, como é o caso do nosso ConnectionManager
-        # notifique os mesmos...
-        for notification_target in (self.connection_manager, ):
-            if notification_target:
-                assert isinstance(notification_target, INotifiable)
-                notification_target.notify_reload()
+    # @NOTE: Cria a ClientSession de forma lazy.
+    # @TODO: Criar um "HttpManager" que faz as operações de download, etc..
+    def get_http_session(self):
+        if not self.active_http_session:
+            self.active_http_session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(
+                    total=self.config.get('global.http_session_timeout', 30)
+                )
+            )
 
-    def notify_internal_shutdown(self):
-        for notification_target in (self.connection_manager, ):
-            if notification_target:
-                assert isinstance(notification_target, INotifiable)
-                notification_target.notify_shutdown()
+        return self.active_http_session
 
-    def listen(self):
+    # @NOTE: Cria a conexão de forma lazy, aqui podemos também executar coisas antes de tentar obter a conexão:
+    # Ex: Verificar se está tudo OK, pois todo comando que usará um componente que acessa o banco eventualmente
+    # vai chegar neste trecho de código.
+    async def get_connection_pool(self):
+        async with asyncio.Lock() as lock:
+            if not self.connection_pool:
+                try:
+                    self.connection_pool = await aiomysql.create_pool(
+                        host=self.config.get('database.host', '127.0.0.1'),
+                        port=self.config.get('database.port', 3306),
+                        user=self.config.get('database.user', 'root'),
+                        password=self.config.get('database.password', ''),
+                        db=self.config.get('database.db', 'navibotdb')
+                    )
+                except Exception as e:
+                    logging.error(f'Connecting to the database failed: {e}')
+                    raise DatabaseError('Não foi possível conectar-se à base de dados.')
+            
+            return self.connection_pool
+
+    def start(self):
         self.client.listen(self.config.get('global.token'))
 
     async def stop(self):
         # Avisa todos os componentes que precisam ser notificados que o bot está desligando..
         # Por enquanto, o método é SYNC.
         self.notify_internal_shutdown()
-
         await self.client.close()
-
-    def get_http_session(self):
-        if not self.active_http_session:
-            self.active_http_session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.config.get('global.http_session_timeout', 30))
-            )
-
-        return self.active_http_session
-
-    async def get_database_connection(self):
-        # @NOTE:
-        # Exception rara, aonde conectamos 2 vezes no banco ao mesmo tempo
-        # devido a falta da trava!!!
-        async with asyncio.Lock():
-            if not self.active_database:
-                self.active_database = databases.Database(
-                    self.config.get('database.connection_string')
-                )
-
-            if not self.active_database.is_connected:
-                try:
-                    await self.active_database.connect()
-                except Exception as e:
-                    logging.error(f'Connecting to the database failed: {e}')
-
-                    raise DatabaseError('Não foi possível conectar-se à base de dados.')
-        
-        return self.active_database
 
     def add_interpreted_command(self, command: InterpretedCommand):
         logging.info(f"Adding interpreted command: {command.name} ({command})")
@@ -866,9 +1189,9 @@ class Bot:
     def extract_mentions_from(self, args: list, flags: dict, ctx: BotContext):
         assert ctx.channel
 
-        flags['mentions'] = []
-        flags['channel_mentions'] = []
-        flags['role_mentions'] = []
+        flags['mentions'] = list()
+        flags['channel_mentions'] = list()
+        flags['role_mentions'] = list()
 
         for arg in args:
             # Padrão das mentions do Discord podem ser encontradas aqui:
@@ -908,11 +1231,10 @@ class Bot:
     async def get_bot_prefix(self, ctx: BotContext):
         assert ctx.channel
 
-        gsm = self.guildsettings
         var = None
 
         try:
-            var = await gsm.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
+            var = await self.guildsettings.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
         except DatabaseError:
             pass
 
@@ -927,20 +1249,20 @@ class Bot:
         if not self.has_permission_level(PermissionLevel.GUILD_MOD, ctx):
             raise PermissionLevelError(f'Você não possui um nível de permissão igual ou superior à `{PermissionLevel.GUILD_MOD.name}`  para poder realizar esta ação.')
 
-        gsm = self.guildsettings
-        var = await gsm.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
+        var = await self.guildsettings.get_guild_variable(ctx.channel.guild.id, 'bot_prefix')
         
         if var:
-            return await gsm.remove_guild_variable(var)
+            return await self.guildsettings.remove_guild_variable(var)
         else:
             raise Exception(f'Variável `bot_prefix` não encontrado no contexto da Guild atual.')
 
-    async def receive_ready(self, kwargs):
+    async def callable_receive_ready(self, kwargs):
         logging.info(f"Successfully logged in")
+
         if self.connection_manager and not self.connection_manager.is_accepting_connections():
             await self.connection_manager.start()
 
-        if self.playing_interval is None:
+        if not self.playing_interval:
             self.playing_interval = IntervalContext(
                 self.config.get('global.playing_delay', 120),
                 self.callable_update_playing,
@@ -949,11 +1271,13 @@ class Bot:
 
             self.playing_interval.create_task()
 
-    async def receive_message(self, kwargs):
+        await self.notify_internal_ready()
+
+    async def callable_receive_message(self, kwargs):
         message = kwargs.get('message')
 
         # Somente aceita mensagens que não são do próprio bot, que não são de outros bots e que está vindo de um canal de texto de uma Guild.
-        if message.author == self.client.user or message.author.bot or not isinstance(message.channel, discord.TextChannel):
+        if message.author.bot or message.author == self.client.user or not isinstance(message.channel, discord.TextChannel):
             return
 
         # Contexto utilizado daqui em diante...
@@ -1082,7 +1406,8 @@ class Bot:
                     activator_flags=activator_flags
                 )
             else:
-                raise BotError(f"O comando `{command.cmd}` não existe, abortando...")
+                # raise BotError(f"O comando `{command.cmd}` não existe, abortando...")
+                logging.warn(f"O comando `{command.cmd}` não existe, abortando...")
 
         # Terminando todo o processamento desta PIPELINE, volte para cima.
         return pipeline_output
@@ -1154,328 +1479,6 @@ class Bot:
 
             await self.set_playing_game(playing_list[index])
             kwargs['index'] = index + 1
-
-class HConnectionManager(ModuleHook):
-    def __init__(self, bot, connection_pool: list):
-        super().__init__(bot)
-
-        self.connection_pool = connection_pool
-
-    def run(self):
-        self.bind_event(
-            ClientEvent.MESSAGE,
-            self.callable_transmit_message
-        )
-
-    async def callable_transmit_message(self, kwargs):
-        message = kwargs.get('message')
-
-        # Só aceita mensagens por privado ou de um canal de texto
-        if not (isinstance(message.channel, discord.TextChannel) or isinstance(message.channel, discord.DMChannel)):
-            return
-
-        # Para cada conexão, enviar a mensagem
-        for cliconn in self.connection_pool:
-            asyncio.create_task(
-                cliconn.write_packet(
-                    {
-                        'type': 'message',
-                        'data': {
-                            'channel': {'id': message.channel.id, 'name': message.channel.name} if message.channel and isinstance(message.channel, discord.TextChannel) else None,
-                            'message': {'id': message.id,'content': message.content},
-                            'author': {'id': message.author.id,'name': message.author.name}
-                        }
-                    }
-                )
-            )
-
-class CliConnection:
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, bot_context: BotContext):
-        self.reader = reader
-        self.writer = writer
-        self.peername = writer.get_extra_info("peername")
-
-        self.bot_context = bot_context
-
-    async def read_data(self):
-        if not self.writer.is_closing():
-            return await self.reader.readline()
-
-    async def write_packet(self, packet: dict):
-        if not self.writer.is_closing():
-            logging.info(f'write_packet: Sending packet {packet} to {self.peername}')
-
-            self.writer.write(
-                (json.dumps(packet) + '\n').encode('utf-8')
-            )
-
-            await self.writer.drain()
-
-    async def wait_closed(self):
-        await self.writer.wait_closed()
-
-    def close(self):
-        assert self.writer.can_write_eof()
-
-        if not self.writer.is_closing():
-            self.writer.write_eof()
-            self.writer.close()
-
-    def is_closing(self):
-        return self.writer.is_closing()
-
-    def at_eof(self):
-        return self.reader.at_eof()
-
-class ConnectionManager(INotifiable):
-    def __init__(self, bot, listen: str, port: int):
-        self.bot = bot
-        self.host = listen
-        self.port = port
-        self.open_server = None
-
-        self.bot_hook = None
-
-        self.handlers = {
-            "command_request": self.handle_command_request
-        }
-        
-        self.active_connections = []
-
-    def notify_reload(self):
-        if self.is_accepting_connections():
-            assert self.bot_hook
-            self.bot_hook = None
-            
-            # O bot recebeu um reload, portato, nosso hook de mensagens caiu!
-            self.hook_required_events()
-
-    def notify_shutdown(self):
-        if self.is_accepting_connections():
-            self.close_all_active_connections()
-
-    def close_all_active_connections(self):
-        for conn in self.active_connections:
-            conn.close()
-
-    def is_accepting_connections(self):
-        return self.open_server != None
-
-    def hook_required_events(self):
-        assert self.bot.hooks
-        assert not self.bot_hook
-
-        self.bot_hook = HConnectionManager(
-            self.bot,
-            self.active_connections
-        )
-
-        self.bot.hooks.register_hook(self.bot_hook)
-
-    def unhook_required_events(self):
-        assert self.bot.hooks
-        assert self.bot_hook
-
-        self.bot.hooks.unregister_hook(self.bot_hook)
-
-    async def start(self):
-        assert not self.open_server
-
-        try:
-            self.open_server = await asyncio.start_server(
-                self.callable_receive_connection,
-                self.host,
-                self.port,
-                start_serving=True
-            )
-        except Exception:
-            logging.info(f'ConnectionManager could not start server, aborting...')
-            return
-
-        self.hook_required_events()
-
-    async def callable_receive_connection(self, reader, writer):
-        peername = writer.get_extra_info("peername")
-
-        logging.info(f'callable_receive_connection: Received new connection from {peername}')
-
-        # Encapsule essa conexão em um objeto, para outros objetos (ModuleHook) tenham acesso por fora
-        cliconn = CliConnection(
-            reader,
-            writer,
-            # Contexto do bot para que seja possível entender se é possível mandar uma mensagem em um canal de texto ou DM, etc...
-            # É persistente durante toda a conexão, só será removido da memória quando o cliente desconectar
-            BotContext(
-                self.bot
-            )
-        )
-
-        self.active_connections.append(cliconn)
-
-        data = await cliconn.read_data()
-        while data and not (cliconn.at_eof() or cliconn.is_closing()):
-            json_packet = None
-
-            try:
-                json_packet = json.loads(data)
-            except Exception:
-                logging.info('callable_receive_connection: Failed to parse json_packet')
-
-            if json_packet:
-                response = await self.handle_received_packet(json_packet, cliconn.bot_context)
-
-                if response:
-                    await cliconn.write_packet(response)
-
-            data = await cliconn.read_data()
-
-        if not cliconn.is_closing():
-            cliconn.close()
-
-        await cliconn.wait_closed()
-
-        self.active_connections.remove(cliconn)
-
-        logging.info(f'callable_receive_connection: Closing connection for {peername}')
-
-    async def handle_received_packet(self, packet, persistent_bot_context: BotContext):
-        # Packet em JSON:
-        # {
-        #     "type": "command_request",
-        #     "data": "echo teste 1 2 3"
-        # }
-
-        type = packet.get('type', None)
-        data = packet.get('data', None)
-
-        if type and type in self.handlers:
-            if not data:
-                logging.warn(f'handle_received_packet: Received packet without data')
-            
-            return await self.handlers[type](data, persistent_bot_context)
-        else:
-            logging.info(f'handle_received_packet: Received unknown packet type: {type}')
-
-    async def handle_command_request(self, data, persistent_bot_context: BotContext):
-        # Arg data pode ser um dict ou uma string ou até mesmo None
-        logging.info(f'handle_command_request: Trying to handle command request for data: {data}')
-        
-        if not data:
-            return
-
-        current_context = CliContext(
-            self.bot,
-            data,
-            io.StringIO(),
-            persistent_bot_context
-        )
-
-        await self.bot.handle_cli_command_parse(
-            current_context,
-            data
-        )
-
-        return {
-            "type": "command_response",
-            "data": current_context.extract_output_data()
-        }
-
-class GuildSettingsManager:
-    def __init__(self, bot: Bot, default_values: dict={}, cache_timelimit: int=60 * 30):
-        self.bot = bot
-        self.default_values = default_values
-        self.guildmap = {}
-        self.cache_timelimit = cache_timelimit
-
-    async def get_database_connection(self):
-        return await self.bot.get_database_connection()
-
-    async def get_cacheable_guild_variable(self, guildid: int, key: str):
-        # @NOTE:
-        # Utilizando um sistema de "lazy load", aonde as variáveis vão sendo guardadas em memória a medida que são requisitadas
-        # para cada variavel existe um tempo de cache, se ele expirar, podemos pensar em 2 alterantivas:
-        # 1. Retirar da memória a variavel (pois assumimos que a Guild não usará ela por um bom tempo)
-        # 2. Deixar em memória, porém uma nova requisição que chegar, forçará a sua atualização com base no banco de dados (comportamento atual).
-        # para meio estranho não liberar memória, mas escrever um gerenciador para retirar da memória parece uma tarefa um pouco mais complicada.
-        dal = GuildVariableDAL(await self.get_database_connection())
-
-        if not guildid in self.guildmap:
-            self.guildmap[guildid] = {}
-
-        if key in self.guildmap[guildid] and time.time() - self.guildmap[guildid][key].fetched_at < self.cache_timelimit:
-            currvar = self.guildmap[guildid][key]
-        else:
-            currvar = await dal.get_variable(guildid, key)
-
-            if currvar:
-                currvar.fetched_at = time.time()
-                self.guildmap[guildid][key] = currvar
-
-        return currvar
-        
-    async def get_guild_variable(self, guildid: int, key: str):
-        var = await self.get_cacheable_guild_variable(guildid, key)
-
-        if not var:
-            default = self.default_values.get(key, None)
-
-            if default != None:
-                var = GuildVariable( 
-                    guildid,
-                    key,
-                    default,
-                    None
-                )
-
-        return var
-
-    async def get_all_guild_variables(self, guildid: int):
-        dal = GuildVariableDAL(await self.get_database_connection())
-
-        if not guildid in self.guildmap:
-            self.guildmap[guildid] = {}
-
-        tm = time.time()
-        for var in await dal.get_all_variables(guildid):
-            var.fetched_at = tm
-            self.guildmap[guildid][var.key] = var
-
-        dictview = dict(self.guildmap[guildid])
-        for key, value in self.default_values.items():
-            if not key in dictview:
-                dictview[key] = GuildVariable( 
-                    guildid,
-                    key,
-                    value,
-                    None
-                )
-
-        return dictview
-
-    async def update_guild_variable(self, variable: GuildVariable):
-        dal = GuildVariableDAL(await self.get_database_connection())
-
-        if variable.key in self.guildmap[variable.guildid]:
-            # Já temos no banco
-            return await dal.update_variable(variable)
-        else:
-            ok = await dal.create_variable(variable)
-
-            if ok:
-                self.guildmap[variable.guildid][variable.key] = variable
-                variable.fetched_at = time.time()
-
-            return ok
-
-    async def remove_guild_variable(self, variable: GuildVariable):
-        dal = GuildVariableDAL(await self.get_database_connection())
-
-        ok = await dal.remove_variable(variable)
-
-        if ok and variable.key in self.guildmap[variable.guildid]:
-            del self.guildmap[variable.guildid][variable.key]
-
-        return ok
 
 class Slider:
     def __init__(self, bot: Bot, ctx: BotContext, items: list, reaction_right: str=r'▶️', reaction_left: str=r'◀️', restricted: bool=False, startat: int=0, timeout: int=60):

@@ -43,10 +43,10 @@ class HWelcomeMessage(ModuleHook):
     async def callable_receive_member_join(self, kwargs):
         member = kwargs.get('member')
 
-        gsm = self.get_guild_settings_manager()
-
-        vc = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_id')
-        vm = await gsm.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+        vc, vm = await asyncio.gather(
+            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
+            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+        )
 
         if vc and vc.get_value() and vm and vm.get_value():
             channel = member.guild.get_channel(vc.get_value())

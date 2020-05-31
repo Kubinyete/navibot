@@ -22,7 +22,7 @@ class NaviDaemon(run.RunDaemon):
             loglevel=logging.INFO
         )
         
-        bot.listen()
+        bot.start()
 
 def show_usage():
     print(f"Uso:\n\n{sys.argv[0]} <start|stop|restart>")

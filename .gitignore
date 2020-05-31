@@ -130,4 +130,4 @@ dmypy.json
 release/*
 *.log
 *.pid
-
+archive/*

@@ -70,13 +70,12 @@ class CYandere(BotCommand):
 
                 description = ""
         else:
-            gsm = self.get_guild_settings_manager()
             nsfw_disabled = True
 
             if isinstance(message.channel, discord.TextChannel):
                 post_json, nsfw_disabled = await asyncio.gather(
                     self.api.fetch_posts(tags=inputstr, page=page, limit=self.posts_per_page),
-                    gsm.get_guild_variable(message.channel.guild.id, 'nsfw_disabled')
+                    self.bot.guildsettings.get_guild_variable(message.channel.guild.id, 'nsfw_disabled')
                 )
 
                 nsfw_disabled = nsfw_disabled.get_value() if nsfw_disabled else True
