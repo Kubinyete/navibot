@@ -17,7 +17,7 @@ class CYandere(BotCommand):
             usage = "[--post] [tag1] [tagN]... [--page=1] | --tag [buscaTag...]"
         )
 
-        self.api = YandereApi()
+        self.api = YandereApi(self.bot.get_http_session())
 
         # s: safe, q: questionable, e: explicit
         self.safe_ratings = ('s')

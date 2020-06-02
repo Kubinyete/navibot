@@ -5,8 +5,8 @@
 - [x] make-config.sh (2020-04-14 11:24:48)
 - [X] Adicionar operador que desativa a resolução de subcomandos dentro de argumentos literais. (2020-04-15 21:00:50)
 - [X] Adicionar suporte à CLI (se conectando ao bot, podendo executar comandos, interagir com a instância e podendo receber as mensagens dos canais) (2020-05-04 22:42:48)
+- [X] Launcher separado estilo daemon para o bot.
 - [ ] Suporte a mais de uma linguagem (pt-br, en, etc...)
-- [ ] Launcher separado estilo daemon para o bot.
 
 #### Comandos
 
@@ -41,15 +41,11 @@
 - [ ] marry @Usuario
 - [ ] divorce @Usuario
 
-- [ ] profile [@Usuario]
-    Um perfil deve ser vinculado somente à uma Guild, ou deve ser global?
-        Vamos inicialmente testar um perfil para cada Guild, pois ai podemos customizar a experiência do perfil para cada Guild.
-    Suporte à imagens de fundo (capa de perfil)?
-        Sim. Limite max. de 128 KB por membro, o bot fica responsável pela diminuição da imagem (geração de versão de miniatura).
-        Lembrete: Limite de uma imagem attachment é 400x300.
-        Suporte a links de outras contas? Faz mais sentido para links de coisas não tão mainstream (Ex: Osu)
-            Osu, Steam, Twitter, Facebook?
-    NOTE: Não consegui implementar isso de forma fácil, tive problemas com o MySQL, troquei a biblioteca para o aiomysql e usando pool de conexão, mas mesmo assim há conflitos de transações entre os updates no EXP do usuário... O modulo opt_progression foi desativado por enquanto.
+- [X] profile [@Usuario]
+    - [X] Monitorar e atribuir EXP para os membros
+    - [X] Permitir visualizar uma assinatura de perfil
+        - [ ] Suporte a troca de fundo
+        
 - [ ] credits [@Usuario]
 - [ ] exp [@Usuario]
 - [ ] givecredits amount [@Usuario]
@@ -58,4 +54,4 @@
 - [ ] shop [buy|search|show] [itemName]
 
 - [ ] reactionroles reactionRoleId reaction @Role [--list] [--remove-messages] [--make]
-    Pensar melhor nisso aqui, como resolver a questão de limpar roles e a mensagem que da os roles, etc...
+    - Pensar melhor nisso aqui, como resolver a questão de limpar roles e a mensagem que da os roles, etc...

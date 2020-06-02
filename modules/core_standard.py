@@ -9,9 +9,47 @@ import io
 import PIL.Image
 import aiohttp
 
-from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, EmojiType, Slider
+from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, EmojiType, Slider, Plugin, IntervalContext
 from navibot.errors import CommandError
 from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string, bytes_string, normalize_image_size
+
+class PPlayingStatusInterval(Plugin):
+    def __init__(self, bot):
+        super().__init__(bot)
+        
+        self.running_interval = IntervalContext(
+            bot.config.get('global.playing_delay', 120),
+            self.callable_update_playing,
+            ignore_exception=True
+        )
+
+    async def on_plugin_destroy(self):
+        if self.running_interval.is_running():
+            self.running_interval.cancel_task()
+
+    async def on_bot_ready(self):
+        if not self.running_interval.is_running():
+            self.running_interval.create_task()
+
+    async def on_bot_shutdown(self):
+        if self.running_interval.is_running():
+            self.running_interval.cancel_task()
+
+    async def callable_update_playing(self, intervalcontext: IntervalContext, kwargs: dict):
+        index = kwargs.get('index', 0)
+        playing_list = self.bot.config.get('global.playing', None)
+
+        if not playing_list or len(playing_list) == 1:
+            intervalcontext.safe_halt = True
+
+            if playing_list:
+                await self.bot.set_playing_game(playing_list[index])
+        else:
+            if index >= len(playing_list):
+                index = 0
+
+            await self.bot.set_playing_game(playing_list[index])
+            kwargs['index'] = index + 1
 
 class CHelp(BotCommand):
     def __init__(self, bot):
@@ -368,9 +406,7 @@ class CTriggered(BotCommand):
             supported_args_type = (str, discord.File)
         )
 
-        self.triggered_image = PIL.Image.open(
-            f'{self.bot.curr_path}/repo/std/triggered.png'
-        )
+        self.triggered_image = PIL.Image.open(f'{self.bot.curr_path}/repo/std/triggered.png')
 
         # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
         self.triggered_image.load()
@@ -408,8 +444,6 @@ class CTriggered(BotCommand):
         else:
             url = str(mentions[0].avatar_url_as(size=self.max_image_size))
 
-        # await ctx.channel.trigger_typing()
-
         if not bytes:
             try:
                 async with self.bot.get_http_session().get(url) as resp:
@@ -426,7 +460,6 @@ class CTriggered(BotCommand):
             finally:
                 bio_input = io.BytesIO(bytes)
         else:
-            # Já é BytesIO
             bio_input = bytes
 
         bio_output = io.BytesIO()
@@ -462,12 +495,10 @@ class CTriggered(BotCommand):
                     p = pixel[(x, y)]
 
                     v1 = math.floor(p[0] * self.red_factor)
-                    v2 = math.floor(p[1] * self.suppress_factor)
-                    v3 = math.floor(p[2] * self.suppress_factor)
+                    v2 = math.ceil(p[1] * self.suppress_factor)
+                    v3 = math.ceil(p[2] * self.suppress_factor)
                     
                     v1 = 255 if v1 > 255 else v1
-                    # v2 = 255 if v2 > 255 else v2
-                    # v3 = 255 if v3 > 255 else v3
 
                     pixel[(x, y)] = (v1, v2, v3, p[3])
 
@@ -482,6 +513,7 @@ class CTriggered(BotCommand):
                 trigered_image_copy, 
                 (0, curr_img.height - trigered_image_copy.height)
             )
+            
             curr_img.save(bio_output, format='PNG')
 
         await asyncio.get_running_loop().run_in_executor(
@@ -508,9 +540,7 @@ class CThinking(BotCommand):
             supported_args_type = (str, discord.File)
         )
 
-        self.thinking_image = PIL.Image.open(
-            f'{self.bot.curr_path}/repo/std/thinkinghand.png'
-        )
+        self.thinking_image = PIL.Image.open(f'{self.bot.curr_path}/repo/std/thinkinghand.png')
 
         # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
         self.thinking_image.load()
@@ -546,8 +576,6 @@ class CThinking(BotCommand):
         else:
             url = str(mentions[0].avatar_url_as(size=self.max_image_size))
 
-        # await ctx.channel.trigger_typing()
-
         if not bytes:
             try:
                 async with self.bot.get_http_session().get(url) as resp:
@@ -564,7 +592,6 @@ class CThinking(BotCommand):
             finally:
                 bio_input = io.BytesIO(bytes)
         else:
-            # Já é BytesIO
             bio_input = bytes
 
         bio_output = io.BytesIO()
@@ -583,19 +610,16 @@ class CThinking(BotCommand):
             curr_img = curr_img.convert(mode='RGBA')
             thinking_image_copy = self.thinking_image.copy()
             curr_img = normalize_image_size(curr_img, self.max_image_size)
-            # @NOTE:
-            # 1. Redimensionar thinking_image_copy para que apresente 1/2 do tamanho vertical de curr_img
+            # Redimensionar thinking_image_copy para que apresente 1/2 do tamanho vertical de curr_img
+            thinking_image_copy = normalize_image_size(thinking_image_copy, math.floor(curr_img.height / 2))
 
-            thinking_image_copy = normalize_image_size(
-                thinking_image_copy, 
-                math.floor(curr_img.height / 2)
-            )
 
             curr_img.paste(
                 thinking_image_copy, 
                 (math.floor(curr_img.width / 2 - thinking_image_copy.height / 2), curr_img.height - thinking_image_copy.height),
                 thinking_image_copy
             )
+
             curr_img.save(bio_output, format='PNG')
 
         await asyncio.get_running_loop().run_in_executor(

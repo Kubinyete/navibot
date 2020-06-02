@@ -41,8 +41,7 @@ class GuildVariable:
         return self.value
 
 class MemberInfo:
-    def __init__(self, guildid: int, userid: int, exp: int, profile_cover: bytes):
-        self.guildid = guildid
+    def __init__(self, userid: int, exp: int, profile_cover: bytes):
         self.userid = userid
         self.exp = exp
         self.profile_cover = profile_cover

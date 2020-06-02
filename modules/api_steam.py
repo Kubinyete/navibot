@@ -15,9 +15,7 @@ class CSteam(BotCommand):
             usage = "steamID|customURL"
         )
 
-        self.api = SteamApi(
-            self.bot.config.get('modules.steam.key')
-        )
+        self.api = SteamApi(self.bot.config.get('modules.steam.key'),self.bot.get_http_session())
 
     async def run(self, ctx, args, flags):
         if not args:

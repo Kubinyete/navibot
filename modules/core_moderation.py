@@ -1,9 +1,37 @@
 import asyncio
 import logging
 
-from navibot.client import BotCommand, ModuleHook, BotContext, EmojiType, PermissionLevel, ClientEvent
+from navibot.client import BotCommand, BotContext, EmojiType, PermissionLevel, ClientEvent, Plugin
 from navibot.parser import CommandParser
 from navibot.errors import CommandError
+
+class PWelcomeMessage(Plugin):
+    async def on_plugin_load(self):
+        self.bind_event(
+            ClientEvent.MEMBER_JOIN,
+            self.callable_receive_member_join
+        )
+
+    async def callable_receive_member_join(self, kwargs):
+        member = kwargs.get('member')
+
+        vc, vm = await asyncio.gather(
+            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
+            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
+        )
+
+        if vc and vc.get_value() and vm and vm.get_value():
+            channel = member.guild.get_channel(vc.get_value())
+
+            if channel:
+                await self.bot.handle_command_parse(
+                    BotContext(
+                        self.bot,
+                        channel,
+                        member
+                    ),
+                    vm.get_value()
+                )
 
 class CNsfw(BotCommand):
     def __init__(self, bot):
@@ -152,32 +180,3 @@ class CSetPrefix(BotCommand):
                 return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `bot_prefix` não encontrado no contexto da Guild atual.')
-
-
-class HWelcomeMessage(ModuleHook):
-    async def callable_receive_member_join(self, kwargs):
-        member = kwargs.get('member')
-
-        vc, vm = await asyncio.gather(
-            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_id'),
-            self.bot.guildsettings.get_guild_variable(member.guild.id, 'gst_welcome_channel_message')
-        )
-
-        if vc and vc.get_value() and vm and vm.get_value():
-            channel = member.guild.get_channel(vc.get_value())
-
-            if channel:
-                await self.bot.handle_command_parse(
-                    BotContext(
-                        self.bot,
-                        channel,
-                        member
-                    ),
-                    vm.get_value()
-                )
-    
-    def run(self):
-        self.bind_event(
-            ClientEvent.MEMBER_JOIN,
-            self.callable_receive_member_join
-        )

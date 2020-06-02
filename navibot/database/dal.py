@@ -1,13 +1,5 @@
 import logging
-# import aiomysql
-# import asyncio
-
-# @NOTE:
-# Retirada à referência ao modulo databases
-# pois o mesmo não se encaixa no nosso caso de uso
-# precisamos de suporte à pools de conexões, para poder
-# trabalhar de modo assíncrono
-# from databases import Database
+import aiomysql
 
 from navibot.database.models import GuildVariable, VariableType, MemberInfo
 
@@ -20,44 +12,53 @@ class BaseDAL:
         raise NotImplementedError()
 
 class MemberInfoDAL(BaseDAL):
-    def map_current_object(self, row, guildid: int, memid: int):
+    def map_current_object(self, row, memid: int):
         return MemberInfo(
-            guildid,
             memid,
             row[0],
             row[1]
         )
 
-    async def get_member_info(self, guildid: int, memid: int):
+    async def get_member_info(self, memid: int):
         async with self.conn.cursor() as c:
             await c.execute(
-                query='SELECT mem_exp, mem_profile_cover FROM member_info WHERE gui_id = %s AND mem_id = %s LIMIT 1;',
-                args=(guildid, memid)
+                query='SELECT mem_exp, mem_profile_cover FROM member_info WHERE mem_id = %s LIMIT 1;',
+                args=(memid, )
             )
 
             rows = await c.fetchone()
+            await self.conn.commit()
 
             return self.map_current_object(
                 rows, 
-                guildid=guildid,
                 memid=memid
             ) if rows else None
 
-    async def add_exp_to_member(self, guildid: int, memid: int, amount: int):
+    async def update_member_info(self, member: MemberInfo):
         async with self.conn.cursor() as c:
             await c.execute(
-                query='UPDATE member_info SET mem_exp = mem_exp + %s WHERE gui_id = %s AND mem_id = %s',
-                args=(amount, guildid, memid)
+                query='UPDATE member_info SET mem_exp = %s, mem_profile_cover = %s WHERE mem_id = %s;',
+                args=(member.exp, member.profile_cover, member.userid)
             )
 
             await self.conn.commit()
             return True
 
-    async def init_member_info(self, guildid: int, memid: int, amount: int):
+    async def update_member_info_exp_only(self, member: MemberInfo):
         async with self.conn.cursor() as c:
             await c.execute(
-                query='INSERT INTO member_info (gui_id, mem_id, mem_exp) VALUES (%s, %s, %s)',
-                args=(guildid, memid, amount)
+                query='UPDATE member_info SET mem_exp = %s WHERE mem_id = %s;',
+                args=(member.exp, member.userid)
+            )
+
+            await self.conn.commit()
+            return True
+
+    async def create_member_info(self, member: MemberInfo):
+        async with self.conn.cursor() as c:
+            await c.execute(
+                query='INSERT INTO member_info (mem_id, mem_exp, mem_profile_cover) VALUES (%s, %s, %s);',
+                args=(member.userid, member.exp, member.profile_cover)
             )
 
             await self.conn.commit()
@@ -87,6 +88,7 @@ class GuildVariableDAL(BaseDAL):
             )
 
             rows = await c.fetchone()
+            await self.conn.commit()
 
             return self.map_current_object(
                 rows, 
@@ -103,6 +105,7 @@ class GuildVariableDAL(BaseDAL):
             )
 
             rows = c.fetchall()
+            await self.conn.commit()
 
             return [
                 self.map_current_object(
@@ -120,7 +123,6 @@ class GuildVariableDAL(BaseDAL):
 
             await self.conn.commit()
             return True
-
 
     async def update_variable(self, variable: GuildVariable):
         async with self.conn.cursor() as c:

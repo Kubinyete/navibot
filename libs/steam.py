@@ -3,7 +3,7 @@ import logging
 
 # @TODO: Fazer com que APIs retornem seus próprios objetos
 class SteamApi:
-    def __init__(self, key, aiohttpSession=aiohttp.ClientSession()):
+    def __init__(self, key, aiohttpSession: aiohttp.ClientSession):
         self.domain = "http://api.steampowered.com"
         self.session = aiohttpSession
         self.key = key

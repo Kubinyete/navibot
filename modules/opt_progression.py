@@ -4,62 +4,37 @@ import logging
 import aiohttp
 import io
 import math
+import time
 import PIL.Image
 import PIL.ImageFont
 import PIL.ImageDraw
 
-from navibot.client import Bot, BotCommand, PermissionLevel, EmojiType, ModuleHook, ClientEvent, BotContext
+from navibot.client import Bot, BotCommand, PermissionLevel, EmojiType, ClientEvent, BotContext, Plugin, IntervalContext
 from navibot.errors import CommandError
 from navibot.util import bytes_string, normalize_image_size
 from navibot.database.dal import MemberInfoDAL
+from navibot.database.models import MemberInfo
 
-class ProgressionManager:
-    def __init__(self, bot: Bot):
-        self.bot = bot
-
-    async def get_connection_pool(self):
-        return await self.bot.get_connection_pool()
-
-    async def get_member_info(self, member: discord.Member):
-        async with (await self.get_connection_pool()).acquire() as conn:
-            d = MemberInfoDAL(conn)
-
-            return await d.get_member_info(
-                member.guild.id,
-                member.id
-            )
-
-    async def init_member_info(self, member: discord.Member, amount: int):
-        async with (await self.get_connection_pool()).acquire() as conn:
-            d = MemberInfoDAL(conn)
-
-            return await d.init_member_info(
-                member.guild.id,
-                member.id,
-                amount
-            )
-
-    async def add_exp_to_member(self, member: discord.Member, amount: int):
-        async with (await self.get_connection_pool()).acquire() as conn:
-            d = MemberInfoDAL(conn)
-
-            return await d.add_exp_to_member(
-                member.guild.id,
-                member.id,
-                amount
-            )
-
-class HProgressionManager(ModuleHook):
+class PProgressionRewarder(Plugin):
     def __init__(self, bot):
         super().__init__(bot)
+        self.manager = ProgressionManager(bot, max_level_allowed=100)
 
-        self.manager = ProgressionManager(bot)
+    async def on_bot_start(self):
+        sync_interval = self.bot.config.get('modules.progression.sync_interval', 300)
+        logging.info(f'PProgressionRewarder sync_interval for ProgressionManager is set to {sync_interval}')
 
-    def run(self):
+    async def on_plugin_load(self):
         self.bind_event(
             ClientEvent.MESSAGE,
             self.callable_progression_receive_message
         )
+
+        self.manager.start_processing()
+
+    async def on_plugin_destroy(self):
+        if self.manager.is_processing():
+            self.manager.stop_processing()
 
     async def handle_levelup_message(self, message: discord.Message, currlevel: int):
         ctx = BotContext(
@@ -82,34 +57,102 @@ class HProgressionManager(ModuleHook):
         if not isinstance(message.channel, discord.TextChannel) or message.author == self.bot.client.user or message.author.bot:
             return
 
-        expected_message_length, message_reward_value, show_levelup = await asyncio.gather(
-            self.bot.guildsettings.get_guild_variable(message.guild.id, 'pro_expected_message_length'),
-            self.bot.guildsettings.get_guild_variable(message.guild.id, 'pro_message_reward_value'),
-            self.bot.guildsettings.get_guild_variable(message.guild.id, 'pro_show_levelup')
-        )
+        expected_message_length = self.bot.config.get('progression.expected_message_length', 50)
+        expected_reward_value = self.bot.config.get('progression.expected_reward_value', 50)
 
-        receive_factor = len(message.content) / expected_message_length.get_value()
+        show_levelup = await self.bot.guildsettings.get_guild_variable(message.guild.id, 'pro_show_levelup')
+
+        receive_factor = len(message.content) / expected_message_length
         if receive_factor > 1:
             receive_factor = 1
 
-        received_exp = math.ceil(message_reward_value.get_value() * receive_factor)
+        received_exp = math.ceil(expected_reward_value * receive_factor)
 
-        async with asyncio.Lock() as lock:
-            member_info = await self.manager.get_member_info(message.author)
+        member_info, levelup = await self.manager.give_exp_reward(message.author.id, received_exp)
 
-            if not member_info:
-                await self.manager.init_member_info(message.author, received_exp)
-            else:
-                if await self.manager.add_exp_to_member(message.author, received_exp):
-                    if show_levelup.get_value():
-                        prevlevel = member_info.get_current_level()
-                        member_info.exp += received_exp
-                        currlevel = member_info.get_current_level()
+        if levelup and show_levelup:
+            await self.handle_levelup_message(message, member_info.get_current_level())
 
-                        if currlevel > prevlevel:
-                            await self.handle_levelup_message(message, currlevel)
+class ProgressionManager:
+    def __init__(self, bot: Bot, max_level_allowed=100):
+        self.bot = bot
+        self.membermap = {}
+        self.pending_processing = set()
+        self.max_level_allowed = max_level_allowed
+
+        self.sync_interval = IntervalContext(
+            bot.config.get('modules.progression.sync_interval', 300),
+            self.callable_proccess_pending
+        )
+
+    def start_processing(self):
+        logging.info(f'start_processing is creating a task for sync_interval...')
+        self.sync_interval.create_task()
+
+    def stop_processing(self):
+        logging.info(f'stop_processing is destroying a task for sync_interval...')
+        self.sync_interval.cancel_task()
+
+    def is_processing(self):
+        logging.info(f'is_processing sync_interval is running = {self.sync_interval.is_running()}...')
+        return self.sync_interval.is_running()
+
+    async def callable_proccess_pending(self, interval: IntervalContext, kwargs: dict):
+        stamp = time.perf_counter()
+        logging.info(f'Starting processing of pending_processing MemberInfo queue at timestamp {stamp}...')
+
+        # Se não fizermos uma copia, corremos o risco de nunca terminarmos de iterar sobre a lista de pendentes
+        pending_copy = self.pending_processing.copy()
+        self.pending_processing.clear()
+
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            d = MemberInfoDAL(conn)
+
+            for mem in pending_copy:
+                member_exists = await d.get_member_info(mem.userid)
+
+                if not member_exists:
+                    if not await d.create_member_info(mem):
+                        logging.info(f'callable_proccess_pending Failed to create_member_info for member {mem.userid} in queue.')
                 else:
-                    logging.info('HPROGRESSIONMANAGER: ProgressionManager failed to execute add_exp_to_member')
+                    if not await d.update_member_info_exp_only(mem):
+                        logging.info(f'callable_proccess_pending Failed to update_member_info_exp_only for member {mem.userid} in queue.')
+
+        
+        logging.info(f'Finished processing of pending_processing MemberInfo queue, took {time.perf_counter() - stamp} second(s).')
+
+    async def get_cacheable_member_info(self, memid: int):
+        member_info = self.membermap.get(memid, None)
+
+        if not member_info:
+            async with (await self.bot.get_connection_pool()).acquire() as conn:
+                d = MemberInfoDAL(conn)
+                member_info = await d.get_member_info(memid)
+                member_info = member_info if member_info else MemberInfo(memid, 0, None)
+                self.membermap[memid] = member_info
+            
+        return member_info
+
+    async def give_exp_reward(self, memid: int, amount: int):
+        member_info = await self.get_cacheable_member_info(memid)
+        max_allowed_exp = MemberInfo.get_exp_required_for_level(self.max_level_allowed)
+
+        # Nao atualiza se ja bateu o teto de EXP
+        if member_info.exp < max_allowed_exp:
+            prev_level = member_info.get_current_level()
+            
+            member_info.exp += amount
+            if member_info.exp >= max_allowed_exp:
+                member_info.exp = max_allowed_exp
+
+            curr_level = member_info.get_current_level()
+
+            if not member_info in self.pending_processing:
+                self.pending_processing.add(member_info)
+
+            return member_info, curr_level > prev_level
+        else:
+            return member_info, False
 
 class CProfile(BotCommand):
     def __init__(self, bot):
@@ -118,27 +161,16 @@ class CProfile(BotCommand):
             name = "profile",
             aliases = ['pf'],
             description = "Exibe o perfil Navibot do próprio autor ou o do membro mencionado.",
-            usage = '[@Usuario]',
-            permissionlevel = PermissionLevel.BOT_OWNER
+            usage = '[@Usuario]'
         )
 
-        local_repo = self.bot.config.get('global.local_repo', None)
-
-        self.profile_template_fl = PIL.Image.open(
-            f'{self.bot.curr_path}/repo/profile/profile-template-fl.png'
-        )
-
-        self.profile_template_xpbar_full = PIL.Image.open(
-            f'{self.bot.curr_path}/repo/profile/profile-template-xpbar-full.png'
-        )
+        self.profile_template_fl = PIL.Image.open(f'{self.bot.curr_path}/repo/profile/profile-template-fl.png')
+        self.profile_template_xpbar_full = PIL.Image.open(f'{self.bot.curr_path}/repo/profile/profile-template-xpbar-full.png')
 
         # @NOTE:
         # Isso é um arquivo que pode ser compartilhado entre outros comandos caso necessário
         # se for preciso, fazer um sistema a parte de carregamento de fontes
-        self.font_raleway_bold = PIL.ImageFont.truetype(
-            f'{local_repo}/fonts/Raleway-Bold.ttf',
-            size=30
-        )
+        self.font_raleway_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/fonts/Raleway-Bold.ttf', size=30)
 
         # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
         self.profile_template_fl.load()
@@ -159,11 +191,11 @@ class CProfile(BotCommand):
         else:
             target = mentions[0]
 
-        pm =  ProgressionManager(self.bot)
-        member_info = await pm.get_member_info(target)
+        pm = self.bot.plugins.get_plugin_by_type(PProgressionRewarder).manager
+        member_info = await pm.get_cacheable_member_info(target.id)
 
         if not member_info:
-            raise CommandError(f'O seu perfil ainda não foi processado, por favor tente novamente mais tarde.')
+            raise CommandError(f'Não foi possível encontrar as informações deste usuário, o usuário não possui um perfil ou ainda está em processamento, por favor tente novamente mais tarde.')
 
         target_name = target.name
         xp_curr_level = member_info.get_current_level()
@@ -293,3 +325,4 @@ class CProfile(BotCommand):
             bio_output,
             filename='profile.png'
         )
+        

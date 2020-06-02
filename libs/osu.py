@@ -18,7 +18,7 @@ class Gamemode(Enum):
 
 # @TODO: Fazer com que APIs retornem seus próprios objetos
 class OsuApi:
-    def __init__(self, key, aiohttpSession=aiohttp.ClientSession()):
+    def __init__(self, key, aiohttpSession: aiohttp.ClientSession):
         self.session = aiohttpSession
         self.domain = r'https://osu.ppy.sh'
         self.key = key

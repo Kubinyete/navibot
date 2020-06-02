@@ -198,15 +198,10 @@ class CExpressionParser(BotCommand):
         if not args:
             return self.get_usage_embed(ctx)
 
-        def callable_parse_and_evaluate():
-            p = ExpressionParser(' '.join(args))
-            tree = p.parse()
-            return tree.evaluate()
-
         try:
             ret = await asyncio.get_running_loop().run_in_executor(
                 None,
-                callable_parse_and_evaluate
+                lambda: ExpressionParser(' '.join(args)).parse().evaluate()
             )
 
             return str(ret)

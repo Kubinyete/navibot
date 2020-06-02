@@ -12,7 +12,6 @@ import re
 import sys
 import io
 import aiohttp
-# import databases
 import aiomysql
 
 from enum import Enum, auto
@@ -23,20 +22,20 @@ from navibot.errors import *
 from navibot.database.dal import GuildVariableDAL
 from navibot.database.models import GuildVariable
 
-class INotifiable:
-    # @NOTE: reload de forma blocking, pos não estamos interessados
-    # em rodar outros códigos enquanto acontece o reload, não faz sentido.
-    def notify_reload(self):
+class IBotNotifiable:
+    async def receive_bot_start(self):
         raise NotImplementedError()
 
-    # @NOTE: shutdown de forma blocking, pos não estamos interessados
-    # em rodar outros códigos enquanto acontece o desligamento, não faz sentido.
-    def notify_shutdown(self):
+    async def receive_bot_reload(self):
         raise NotImplementedError()
 
-    # @NOTE: ready pode acontecer várias vezes durante a execução, e não há mudança na estrutura
-    # do bot durante isto, portanto, deve ser uma coroutine.
-    async def notify_ready(self):
+    async def receive_bot_late_reload(self):
+        raise NotImplementedError()
+
+    async def receive_bot_shutdown(self):
+        raise NotImplementedError()
+
+    async def receive_bot_ready(self):
         raise NotImplementedError()
 
 class PermissionLevel(Enum):
@@ -74,7 +73,6 @@ class Context:
 class BotContext(Context):
     def __init__(self, bot, channel: discord.TextChannel=None, author: discord.User=None, message: discord.Message=None):
         super().__init__(bot)
-        
         self.channel = channel
         self.author = author
         self.message = message
@@ -148,14 +146,12 @@ class BotContext(Context):
             embed = self.create_response_embed()
             embed.description = f'{EmojiType.CROSS_MARK.value} **{type(response).__name__}**: {response}'
             return await target.send(embed=embed)
-
         else:
             raise BotError('Não é possível responder a este contexto, pois o parâmetro informado não é de um tipo conhecido.')
 
 class CliContext(Context):
     def __init__(self, bot, input_data: str, output_data: io.StringIO, botcontext: BotContext=None):
         super().__init__(bot)
-
         self.input_data = input_data
         self.output_data = output_data
         self.botcontext = botcontext
@@ -167,7 +163,8 @@ class CliContext(Context):
         return data
 
     def update_botcontext_target(self, target):
-        assert isinstance(target, discord.User) or isinstance(target, discord.TextChannel)
+        if not isinstance(target, discord.User) and not isinstance(target, discord.TextChannel):
+            raise BotError('É preciso selecionar como alvo um discord.User ou um discord.TextChannel.')
 
         if isinstance(target, discord.User):
             self.botcontext.author = target
@@ -250,7 +247,7 @@ class BotCommand(Command):
         self.hidden = hidden
 
         self.enable_usermap = enable_usermap        
-        self.usermap = dict() if enable_usermap else None
+        self.usermap = {} if enable_usermap else None
 
         self.update_info(kwargs)
 
@@ -266,7 +263,7 @@ class BotCommand(Command):
         try:
             return self.usermap[author.id]
         except KeyError:
-            self.usermap[author.id] = list()
+            self.usermap[author.id] = []
             return self.usermap[author.id]
 
     async def run(self, ctx: BotContext, args: list, flags: dict):
@@ -291,8 +288,10 @@ class InterpretedCommand(BotCommand):
         self.command = command
 
     async def run_command(self, command: str, ctx: BotContext, args: list, flags: dict):
-        p = CommandParser(self.command)
-        pipeline = p.parse()
+        pipeline = await asyncio.get_running_loop().run_in_executor(
+            None,
+            lambda: CommandParser(self.command).parse()
+        ) 
 
         # Executa uma PIPELINE para executar este comando interpretado,
         # os parâmetros activator_args e activator_flags são preservados pois
@@ -317,31 +316,67 @@ class CommandAlias:
     def __init__(self, origin: Command):
         self.origin = origin
 
-class ModuleHook:
+class Plugin(IBotNotifiable):
     def __init__(self, bot):
         self.bot = bot
-        self.binded_events_ids = []
+        self.requested_events = []
+
+    # @NOTE: É executado toda vez que um plugin está completamente carregado.
+    async def on_plugin_load(self):
+        pass
+
+    # @NOTE: É executado toda vez que um plugin está para ser limpo.
+    async def on_plugin_destroy(self):
+        pass
+
+    # @NOTE: Só é executado uma vez quando estamos prestes a logar com o bot.
+    async def on_bot_start(self):
+        pass
+
+    # @NOTE: É executado toda vez que um reload está para acontecer
+    async def on_bot_reload(self):
+        pass
+
+    # @NOTE: É executado toda vez que um reload aconteceu
+    async def on_bot_late_reload(self):
+        pass
+
+    # @NOTE: É executado toda vez que um shutdown está em andamento
+    async def on_bot_shutdown(self):
+        pass
+
+    # @NOTE: É executado toda vez que o bot receber um on_ready
+    async def on_bot_ready(self):
+        pass
 
     def bind_event(self, eventname: ClientEvent, coroutinefunc: callable):
-        self.binded_events_ids.append(
-            (
-                eventname,
-                self.bot.client.register_event(
-                    eventname,
-                    coroutinefunc
-                )
-            )
-        )
+        self.requested_events.append((eventname, self.bot.client.register_event(eventname, coroutinefunc)))
 
-    def clear_binded_events(self):
-        for event, coroutinefunc in self.binded_events_ids:
-            self.bot.client.remove_event(
-                event,
-                coroutinefunc
-            )
+    def clear_events(self):
+        for event, coroutinefunc in self.requested_events:
+            self.bot.client.remove_event(event,coroutinefunc)
 
-    def run(self):
-        raise NotImplementedError()
+    async def load(self):
+        await self.on_plugin_load()
+
+    async def destroy(self):
+        await self.on_plugin_destroy()
+        self.clear_events()
+    
+    async def receive_bot_start(self):
+        await self.on_bot_start()
+
+    async def receive_bot_reload(self):
+        await self.on_bot_reload()
+
+    async def receive_bot_late_reload(self):
+        await self.on_bot_reload()
+
+    async def receive_bot_shutdown(self):
+        await self.on_bot_shutdown()
+
+    async def receive_bot_ready(self):
+        await self.on_bot_ready()
 
 class TimeoutContext:
     def __init__(self, waitfor: int, callable: callable, callback: callable=None, **kwargs):
@@ -350,7 +385,6 @@ class TimeoutContext:
         self.callback = callback
         self.kwargs = kwargs
         self.running_task = None
-        self.caught_exception = None
 
     async def run(self):
         try:
@@ -360,23 +394,24 @@ class TimeoutContext:
             if self.callback:
                 await self.callback(self, self.kwargs)
         except Exception as e:
-            # @TODO:
-            # Não faço ideia do porque eu fiz isso...
-            # ver outra forma de deixar explícito que aconteceu uma Exception
-            self.caught_exception = e
+            raise e
         finally:
             self.running_task = None
 
     def create_task(self):
-        assert not self.running_task
+        assert not self.is_running()
+        self.running_task = asyncio.create_task(self.run())
 
-        self.caught_exception = None
-        self.running_task = asyncio.get_running_loop().create_task(self.run())
+    def cancel_task(self):
+        assert self.is_running()
+        return self.running_task.cancel()
+
+    def is_running(self):
+        return self.running_task is not None
 
 class IntervalContext(TimeoutContext):
     def __init__(self, waitfor: int, callable: callable, max_count: int=0, callback: callable=None, ignore_exception: bool=False, **kwargs):
         super().__init__(waitfor, callable, callback=callback, **kwargs)
-
         self.ignore_exception = ignore_exception
         self.max_count = max_count
         self.safe_halt = False
@@ -400,10 +435,7 @@ class IntervalContext(TimeoutContext):
                     time_delta = time.time() - time_start
                     await asyncio.sleep(self.waitfor - time_delta)    
         except Exception as e:
-            # @TODO:
-            # Não faço ideia do porque eu fiz isso...
-            # ver outra forma de deixar explícito que aconteceu uma Exception
-            self.caught_exception = e
+            raise e
         finally:
             self.running_task = None
 
@@ -415,9 +447,9 @@ class Client(discord.Client):
         super().__init__()
         
         # Eventos globais, sempre ativados antes dos associados
-        self.listeners = dict()
+        self.listeners = {}
         # Eventos associados à uma identificação
-        self.assoc_listeners = dict()
+        self.assoc_listeners = {}
 
         self.assoc_allowed_events = (
             # Pode ser associado a uma Guild ID
@@ -482,14 +514,11 @@ class Client(discord.Client):
             )
         )
 
-    def listen(self, token):
-        self.run(token)
-
     def register_event(self, eventname: ClientEvent, coroutinefunc: callable):
         assert asyncio.iscoroutinefunction(coroutinefunc)
 
         if not eventname.value in self.listeners:
-            self.listeners[eventname.value] = list()
+            self.listeners[eventname.value] = []
 
         if not coroutinefunc in self.listeners[eventname.value]:
             self.listeners[eventname.value].append(coroutinefunc)
@@ -504,12 +533,12 @@ class Client(discord.Client):
         assert identity
 
         if not eventname.value in self.assoc_listeners:
-            self.assoc_listeners[eventname.value] = dict()
+            self.assoc_listeners[eventname.value] = {}
 
         assoc = self.assoc_listeners[eventname.value]
 
         if not identity in assoc:
-            assoc[identity] = list()
+            assoc[identity] = []
 
         assoc[identity].append(coroutinefunc)
                 
@@ -553,6 +582,8 @@ class Config:
         self.kvalues = {}
         self.path = configfile
 
+        self.load()
+
     def load(self):
         with open(self.path, 'r', encoding='utf-8') as f:
             self.kvalues = json.loads(''.join(f.readlines()))
@@ -572,9 +603,8 @@ class Config:
 
         return curr
 
-class CommandsManager:
-    def __init__(self, bot):
-        self.bot = bot
+class CommandDictionary:
+    def __init__(self):
         self.commands = {}
 
     def register_command(self, cmd):
@@ -606,7 +636,7 @@ class CommandsManager:
         self.commands.clear()
 
     def get_all_commands(self, show_hidden: bool=False):
-        cmds = list()
+        cmds = []
         
         for value in self.commands.values():
             # Se for um apelido, não mostre
@@ -617,42 +647,103 @@ class CommandsManager:
 
         return cmds
 
-class HooksManager:
-    def __init__(self, bot):
-        self.bot = bot
-        self.hooks = []
+    def add_interpreted_command(self, command: InterpretedCommand):
+        assert is_instance(command, InterpretedCommand)
+        logging.info(f"Adding interpreted command: {command.name} ({command})")
 
-    def register_hook(self, hook):
-        assert is_instance(hook, ModuleHook)
-        self.hooks.append(hook)
-        hook.run()
+        target = self.get_command_by_name(command.name)
+        if target:
+            if isinstance(target, InterpretedCommand):
+                self.register_command(command)
+            else:
+                raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
+        else:
+            self.register_command(command)
 
-    def unregister_hook(self, hook):
-        assert is_instance(hook, ModuleHook)
-        self.hooks.remove(hook)
-        hook.clear_binded_events()
+    def remove_interpreted_command(self, name: str):
+        command = self.get_command_by_name(name)
 
-    def clear(self):
-        # Reversed, pois estamos excluindo enquanto estamos iterando
-        for hook in reversed(self.hooks):
-            self.unregister_hook(hook)
+        if command:
+            if isinstance(command, InterpretedCommand):
+                self.unregister_command(command)
+                logging.info(f"Removing interpreted command: {command.name} ({command})")
+            else:
+                raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
 
-        assert not self.hooks
+            return command
+        else:
+            raise BotError(f'O comando {name} não existe.')
+
+class PluginsManager(IBotNotifiable):
+    def __init__(self):
+        self.plugins = {}
+
+    async def register_plugin(self, plugin):
+        assert is_instance(plugin, Plugin)
+        typep = type(plugin)
+
+        if not typep in self.plugins:
+            self.plugins[typep] = plugin
+            await plugin.load()
+        else:
+            logging.info(f'O plugin {typep.__name__} ({plugin}) já está registrado, ignorando novo register_plugin')
+
+    def get_plugin_by_type(self, plugintype):
+        return self.plugins[plugintype]
+
+    async def unregister_plugin(self, plugin):
+        assert is_instance(plugin, Plugin)
+        typep = type(plugin)
+
+        await plugin.destroy()
+        del self.plugins[typep]
+
+    async def unregister_plugin_by_type(self, plugintype):
+        if plugintype in self.plugins:
+            await self.unregister_plugin(self.plugins[plugintype])
+        else:
+            logging.info(f'O plugin de tipo {plugintype.__name__} não foi encontrado.')
+
+    async def unregister_all(self):
+        coroutinelist = []
+        for instance in self.plugins.values():
+            # Nao podemos parar a cada destroy()
+            # Agente todos de uma vez
+            coroutinelist.append(self.unregister_plugin(instance))
+
+        await asyncio.gather(*coroutinelist)
+        # @TODO:
+        # Podemos futuramente ter plugins que resistam à um reload
+        assert not self.plugins
+
+    async def receive_bot_start(self):
+        for instance in self.plugins.values():
+            await instance.receive_bot_start()
+
+    async def receive_bot_reload(self):
+        for instance in self.plugins.values():
+            await instance.receive_bot_reload()
+
+    async def receive_bot_late_reload(self):
+        for instance in self.plugins.values():
+            await instance.receive_bot_late_reload()
+
+    async def receive_bot_shutdown(self):
+        for instance in self.plugins.values():
+            await instance.receive_bot_shutdown()
+
+    async def receive_bot_ready(self):
+        for instance in self.plugins.values():
+            await instance.receive_bot_ready()
 
 class GuildSettingsManager:
-    def __init__(self, bot, default_values: dict={}, cache_timelimit: int=60 * 30):
+    def __init__(self, bot, default_values: dict, cache_timelimit: int=60 * 30):
         self.bot = bot
         self.default_values = default_values
         self.guildmap = {}
         self.cache_timelimit = cache_timelimit
 
     async def get_cacheable_guild_variable(self, guildid: int, key: str):
-        # @NOTE:
-        # Utilizando um sistema de "lazy load", aonde as variáveis vão sendo guardadas em memória a medida que são requisitadas
-        # para cada variavel existe um tempo de cache, se ele expirar, podemos pensar em 2 alterantivas:
-        # 1. Retirar da memória a variavel (pois assumimos que a Guild não usará ela por um bom tempo)
-        # 2. Deixar em memória, porém uma nova requisição que chegar, forçará a sua atualização com base no banco de dados (comportamento atual).
-        # para meio estranho não liberar memória, mas escrever um gerenciador para retirar da memória parece uma tarefa um pouco mais complicada.
         async with (await self.bot.get_connection_pool()).acquire() as conn:
             dal = GuildVariableDAL(conn)
 
@@ -737,232 +828,28 @@ class GuildSettingsManager:
 
             return ok
 
-class HConnectionManager(ModuleHook):
-    def __init__(self, bot, connection_pool: list):
-        super().__init__(bot)
-        self.connection_pool = connection_pool
+class LocalizationManager:
+    def __init__(self, guildsettings: GuildSettingsManager, configfile: str, default_lang: str='pt-BR'):
+        self.guildsettings = guildsettings
+        self.config = Config(configfile)
+        self.default_lang = default_lang
 
-    def run(self):
-        self.bind_event(
-            ClientEvent.MESSAGE,
-            self.callable_transmit_message
-        )
+        self.config.load()
 
-    async def callable_transmit_message(self, kwargs):
-        message = kwargs.get('message')
+    def load(self):
+        return self.config.load()
 
-        # Só aceita mensagens por privado ou de um canal de texto
-        if not (isinstance(message.channel, discord.TextChannel) or isinstance(message.channel, discord.DMChannel)):
-            return
+    def translate(self, lang: str, tlkey: str):
+        return self.config.get(f'{lang}.{tlkey}', f'{lang}.{tlkey}')
 
-        # Para cada conexão, enviar a mensagem
-        for cliconn in self.connection_pool:
-            asyncio.create_task(
-                cliconn.write_packet(
-                    {
-                        'type': 'message',
-                        'data': {
-                            'channel': {'id': message.channel.id, 'name': message.channel.name} if message.channel and isinstance(message.channel, discord.TextChannel) else None,
-                            'message': {'id': message.id,'content': message.content},
-                            'author': {'id': message.author.id,'name': message.author.name}
-                        }
-                    }
-                )
-            )
+    async def translate_gc(self, guildid: int, tlkey: str):
+        curr_lang = await self.guildsettings.get_guild_variable(guildid, 'bot_lang')
 
-class CliConnection:
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, bot_context: BotContext):
-        self.reader = reader
-        self.writer = writer
-        self.peername = writer.get_extra_info("peername")
-
-        self.bot_context = bot_context
-
-    async def read_data(self):
-        if not self.writer.is_closing():
-            return await self.reader.readline()
-
-    async def write_packet(self, packet: dict):
-        if not self.writer.is_closing():
-            logging.info(f'write_packet: Sending packet {packet} to {self.peername}')
-
-            self.writer.write(
-                (json.dumps(packet) + '\n').encode('utf-8')
-            )
-
-            await self.writer.drain()
-
-    async def wait_closed(self):
-        await self.writer.wait_closed()
-
-    def close(self):
-        assert self.writer.can_write_eof()
-
-        if not self.writer.is_closing():
-            self.writer.write_eof()
-            self.writer.close()
-
-    def is_closing(self):
-        return self.writer.is_closing()
-
-    def at_eof(self):
-        return self.reader.at_eof()
-
-class ConnectionManager(INotifiable):
-    def __init__(self, bot, listen: str, port: int):
-        self.bot = bot
-        self.host = listen
-        self.port = port
-        self.open_server = None
-
-        self.bot_hook = None
-
-        self.handlers = {
-            "command_request": self.handle_command_request
-        }
-        
-        self.active_connections = []
-
-    def notify_reload(self):
-        if self.is_accepting_connections():
-            assert self.bot_hook
-            self.bot_hook = None
-            
-            # O bot recebeu um reload, portato, nosso hook de mensagens caiu!
-            self.hook_required_events()
-
-    def notify_shutdown(self):
-        if self.is_accepting_connections():
-            self.close_all_active_connections()
-
-    async def notify_ready(self):
-        pass
-
-    def close_all_active_connections(self):
-        for conn in self.active_connections:
-            conn.close()
-
-    def is_accepting_connections(self):
-        return self.open_server != None
-
-    def hook_required_events(self):
-        assert self.bot.hooks
-        assert not self.bot_hook
-
-        self.bot_hook = HConnectionManager(
-            self.bot,
-            self.active_connections
-        )
-
-        self.bot.hooks.register_hook(self.bot_hook)
-
-    def unhook_required_events(self):
-        assert self.bot.hooks
-        assert self.bot_hook
-
-        self.bot.hooks.unregister_hook(self.bot_hook)
-
-    async def start(self):
-        assert not self.open_server
-
-        try:
-            self.open_server = await asyncio.start_server(
-                self.callable_receive_connection,
-                self.host,
-                self.port,
-                start_serving=True
-            )
-        except Exception:
-            logging.info(f'ConnectionManager could not start server, aborting...')
-            return
-
-        self.hook_required_events()
-
-    async def callable_receive_connection(self, reader, writer):
-        peername = writer.get_extra_info("peername")
-
-        logging.info(f'callable_receive_connection: Received new connection from {peername}')
-
-        # Encapsule essa conexão em um objeto, para outros objetos (ModuleHook) tenham acesso por fora
-        cliconn = CliConnection(
-            reader,
-            writer,
-            # Contexto do bot para que seja possível entender se é possível mandar uma mensagem em um canal de texto ou DM, etc...
-            # É persistente durante toda a conexão, só será removido da memória quando o cliente desconectar
-            BotContext(
-                self.bot
-            )
-        )
-
-        self.active_connections.append(cliconn)
-
-        data = await cliconn.read_data()
-        while data and not (cliconn.at_eof() or cliconn.is_closing()):
-            json_packet = None
-
-            try:
-                json_packet = json.loads(data)
-            except Exception:
-                logging.info('callable_receive_connection: Failed to parse json_packet')
-
-            if json_packet:
-                response = await self.handle_received_packet(json_packet, cliconn.bot_context)
-
-                if response:
-                    await cliconn.write_packet(response)
-
-            data = await cliconn.read_data()
-
-        if not cliconn.is_closing():
-            cliconn.close()
-
-        await cliconn.wait_closed()
-
-        self.active_connections.remove(cliconn)
-
-        logging.info(f'callable_receive_connection: Closing connection for {peername}')
-
-    async def handle_received_packet(self, packet, persistent_bot_context: BotContext):
-        # Packet em JSON:
-        # {
-        #     "type": "command_request",
-        #     "data": "echo teste 1 2 3"
-        # }
-
-        type = packet.get('type', None)
-        data = packet.get('data', None)
-
-        if type and type in self.handlers:
-            if not data:
-                logging.warn(f'handle_received_packet: Received packet without data')
-            
-            return await self.handlers[type](data, persistent_bot_context)
+        if curr_lang:
+            curr_lang = curr_lang.get_value()
+            return self.translate(curr_lang, tlkey)
         else:
-            logging.info(f'handle_received_packet: Received unknown packet type: {type}')
-
-    async def handle_command_request(self, data, persistent_bot_context: BotContext):
-        # Arg data pode ser um dict ou uma string ou até mesmo None
-        logging.info(f'handle_command_request: Trying to handle command request for data: {data}')
-        
-        if not data:
-            return
-
-        current_context = CliContext(
-            self.bot,
-            data,
-            io.StringIO(),
-            persistent_bot_context
-        )
-
-        await self.bot.handle_cli_command_parse(
-            current_context,
-            data
-        )
-
-        return {
-            "type": "command_response",
-            "data": current_context.extract_output_data()
-        }
+            return self.translate(self.default_lang, tlkey)
 
 class Bot:
     def __init__(self, path: str=None, logenable: bool=True, logfile: str=None, loglevel=logging.DEBUG):
@@ -979,75 +866,95 @@ class Bot:
             )
 
         # Nosso objeto para carregar valores do arquivo de configurações
-        self.config = Config(f'{self.curr_path}/release/config.json')
-
         # Prepara as configs e o client
-        self.config.load()
+        self.config = Config(f'{self.curr_path}/release/config.json')
         self.client = Client()
 
         # @NOTE: Componentes essenciais
         # Dicionário de comandos, lista de hooks e gerênciador de variáveis
         # Nosso gerênciador de variáveis por Guild.
-        self.commands = CommandsManager(self)
-        self.clicommands = CommandsManager(self)
-        self.hooks = HooksManager(self)
-        self.guildsettings = GuildSettingsManager(self, self.config.get('guild_settings', {}))
+        self.commands = CommandDictionary()
+        self.clicommands = CommandDictionary()
+        self.plugins = PluginsManager()
+        self.guildsettings = GuildSettingsManager(self, default_values=self.config.get('guild_settings'))
+        self.lm = LocalizationManager(self.guildsettings, f'{self.curr_path}/localization.json', default_lang='pt-BR')
 
         # Objeto de conexão de banco de dados ativo no momento.
         self.connection_pool = None
         # Objeto de sessão ativa no momento.
         self.active_http_session = None
-        # Intervalo que fica rodando de fundo para a troca de atividades.
-        self.playing_interval = None
-        # Lista de componentes que devem ser informados durante um desligamento ou reload do bot
-        self.notification_targets = list()
+        # Event loop
+        self.loop = None
 
-        # @NOTE: Componentes opcionais
-        # Servidor de CLI rodando no fundo para aceitar conexões vindas do localhost
-        self.connection_manager = None
-        if self.config.get('connections.enable', False):
-            self.connection_manager = ConnectionManager(
-                self,
-                self.config.get('connections.listen', '127.0.0.1'),
-                self.config.get('connections.port', 7777)
-            )
+    async def notify_internal_start(self):
+        await self.plugins.receive_bot_start()
 
-            self.notification_targets.append(self.connection_manager)
+    async def notify_internal_reload(self):
+        await self.plugins.receive_bot_reload()
+    
+    async def notify_internal_late_reload(self):
+        await self.plugins.receive_bot_late_reload()
 
-        # @NOTE: Rotinas de inicialização
-        # Acoplha nativamente os eventos necessários e carrega todos os modulos
-        self.register_native_events()
-        self.load_all_modules()
-
-    def notify_internal_reload(self):
-        # Caso tenhamos objetos que precisam verificar algo após um reload, como é o caso do nosso ConnectionManager
-        # notifique os mesmos...
-        for notification_target in self.notification_targets:
-            notification_target.notify_reload()
-
-    def notify_internal_shutdown(self):
-        for notification_target in self.notification_targets:
-            notification_target.notify_shutdown()
+    async def notify_internal_shutdown(self):
+        await self.plugins.receive_bot_shutdown()
+        
+        if self.active_http_session:
+            await self.active_http_session.close()
 
     async def notify_internal_ready(self):
-        for notification_target in self.notification_targets:
-            await notification_target.notify_ready()
+        await self.plugins.receive_bot_ready()
+
+    def start(self):
+        self.loop = asyncio.get_event_loop()
+
+        try:
+            self.loop.run_until_complete(self.astart())
+        except KeyboardInterrupt:
+            self.loop.run_until_complete(self.astop())
+        finally:
+            self.loop.close()
+
+    async def astart(self):
+        assert self.loop
+
+        # Prepara já as callbacks nativas
+        self.register_native_events()
+
+        # Carrega todos os modulos, seus comandos e plugins
+        await self.load_all_modules()
+        
+        # Notifica que um evento de início interno do bot
+        await self.notify_internal_start()
+
+        # Efetua login pelo client
+        await self.client.start(self.config.get('global.token'))
+
+    async def astop(self):
+        # Avisa todos os componentes que precisam ser notificados que o bot está desligando..
+        await self.notify_internal_shutdown()
+        await self.client.logout()
 
     def register_native_events(self):
         self.client.register_event(ClientEvent.MESSAGE, self.callable_receive_message)
         self.client.register_event(ClientEvent.READY, self.callable_receive_ready)
 
-    def load_all_modules(self, is_reloading: bool=False):
+    async def load_all_modules(self, is_reloading: bool=False):
         if is_reloading:
+            # Precisamos avisar que os plugins sofrerão reload e outras coisas se necessário
+            await self.notify_internal_reload()
+            # Pode limpar de forma blocking
             self.commands.clear()
-            self.hooks.clear()
-            # Notifica todos os componentes que precisam, que está acontecendo um reload
-            self.notify_internal_reload()
+            # Limpa os plugins de uma só vez
+            await self.plugins.unregister_all()
 
         # Popula o dicionário acima, procurando os modulos em NAVI_PATH/modules e encontra comandos e hooks
-        self.load_modules(f'{self.curr_path}/modules', force_reload=True)
+        await self.load_modules(f'{self.curr_path}/modules', force_reload=True)
 
-    def load_modules(self, dirpath: str, force_reload: bool=False):
+        if is_reloading:
+            # Precisamos avisar que os plugins deram reload
+            await self.notify_internal_late_reload()
+
+    async def load_modules(self, dirpath: str, force_reload: bool=False):
         with os.scandir(dirpath) as iterator:
             for file in iterator:
                 if file.is_file() and file.name.endswith('.py'):
@@ -1065,16 +972,16 @@ class Bot:
                         logging.exception(f'LOAD_MODULES, failed to load module {module_str}, skipping broken module: {type(e).__name__}: {e}')
                         continue
                     finally:
-                        self.load_objects_from_module(mod)
+                        await self.load_objects_from_module(mod)
 
-    def load_objects_from_module(self, mod):
+    async def load_objects_from_module(self, mod):
         logging.info(f"Attempting to load commands from module: {mod}")
         
         # Não gosto muito dessa lambda, mas pore enquanto vamos filtrar assim...
         for obj in inspect.getmembers(mod, lambda x: inspect.isclass(x) and (
                 is_subclass(x, BotCommand) and x != BotCommand and x != InterpretedCommand 
                 or 
-                is_subclass(x, ModuleHook) and x != ModuleHook
+                is_subclass(x, Plugin) and x != Plugin
                 or
                 is_subclass(x, CliCommand) and x != CliCommand
             )):
@@ -1082,22 +989,21 @@ class Bot:
 
             if is_instance(cmd, BotCommand):
                 self.commands.register_command(cmd)
-                logging.info(f"Successfully loaded a new Bot Command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
+                logging.info(f"Successfully loaded a new Command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
             elif is_instance(cmd, CliCommand):
                 self.clicommands.register_command(cmd)
                 logging.info(f"Successfully loaded a new CLI Command: {cmd.name} ({mod.__name__}.{type(cmd).__name__})")
             else:
-                self.hooks.register_hook(cmd)
-                logging.info(f"Successfully loaded a new Bot Hook: {mod.__name__}.{type(cmd).__name__} ({cmd})")
+                await self.plugins.register_plugin(cmd)
+                logging.info(f"Successfully loaded a new Plugin: {mod.__name__}.{type(cmd).__name__} ({cmd})")
 
     async def reload_all_modules(self):
         logging.info(f"Reloading configuration file and all modules...")
-
         self.config.load()
-        self.load_all_modules(True)
+
+        await self.load_all_modules(True)
 
     # @NOTE: Cria a ClientSession de forma lazy.
-    # @TODO: Criar um "HttpManager" que faz as operações de download, etc..
     def get_http_session(self):
         if not self.active_http_session:
             self.active_http_session = aiohttp.ClientSession(
@@ -1128,41 +1034,6 @@ class Bot:
             
             return self.connection_pool
 
-    def start(self):
-        self.client.listen(self.config.get('global.token'))
-
-    async def stop(self):
-        # Avisa todos os componentes que precisam ser notificados que o bot está desligando..
-        # Por enquanto, o método é SYNC.
-        self.notify_internal_shutdown()
-        await self.client.close()
-
-    def add_interpreted_command(self, command: InterpretedCommand):
-        logging.info(f"Adding interpreted command: {command.name} ({command})")
-
-        target = self.commands.get_command_by_name(command.name)
-        if target:
-            if isinstance(target, InterpretedCommand):
-                self.commands.register_command(command)
-            else:
-                raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
-        else:
-            self.commands.register_command(command)
-
-    def remove_interpreted_command(self, name: str):
-        command = self.commands.get_command_by_name(name)
-
-        if command:
-            if isinstance(command, InterpretedCommand):
-                self.commands.unregister_command(command)
-                logging.info(f"Removing interpreted command: {command.name} ({command})")
-            else:
-                raise BotError(f'O comando {command.name} já existe e não pode ser substituido.')
-
-            return command
-        else:
-            raise BotError(f'O comando {name} não existe.')
-
     def has_permission_level(self, permissionlevel: PermissionLevel, ctx: BotContext):
         return self.rate_author_permission_level(ctx).value >= permissionlevel.value
 
@@ -1189,9 +1060,9 @@ class Bot:
     def extract_mentions_from(self, args: list, flags: dict, ctx: BotContext):
         assert ctx.channel
 
-        flags['mentions'] = list()
-        flags['channel_mentions'] = list()
-        flags['role_mentions'] = list()
+        flags['mentions'] = []
+        flags['channel_mentions'] = []
+        flags['role_mentions'] = []
 
         for arg in args:
             # Padrão das mentions do Discord podem ser encontradas aqui:
@@ -1222,6 +1093,7 @@ class Bot:
                     raise BotError(f'O objeto `{num}` mencionado não foi encontrado na Guild atual.')
 
     async def set_playing_game(self, playingstr: str, status=discord.Status, afk: bool=False):
+        logging.info(f'set_playing_game Bot is about to change presence to "{playingstr}"')
         return await self.client.change_presence(
             activity=discord.Game(playingstr), 
             status=status, 
@@ -1258,19 +1130,6 @@ class Bot:
 
     async def callable_receive_ready(self, kwargs):
         logging.info(f"Successfully logged in")
-
-        if self.connection_manager and not self.connection_manager.is_accepting_connections():
-            await self.connection_manager.start()
-
-        if not self.playing_interval:
-            self.playing_interval = IntervalContext(
-                self.config.get('global.playing_delay', 120),
-                self.callable_update_playing,
-                ignore_exception=True
-            )
-
-            self.playing_interval.create_task()
-
         await self.notify_internal_ready()
 
     async def callable_receive_message(self, kwargs):
@@ -1318,19 +1177,11 @@ class Bot:
     async def handle_cli_command_parse(self, ctx: CliContext, content: str):
         return await self.handle_command_parse(ctx, content, resolve_subcommands=False, alternative_target_commands=self.clicommands)
 
-    async def handle_command_parse(self, ctx: Context, content: str, resolve_subcommands: bool=True, alternative_target_commands: CommandsManager=None):
-        def callable_parse_pipeline():
-            parser = CommandParser(
-                content,
-                resolve_subcommands
-            )
-
-            return parser.parse()
-            
+    async def handle_command_parse(self, ctx: Context, content: str, resolve_subcommands: bool=True, alternative_target_commands: CommandDictionary=None):
         try:
             pipeline = await asyncio.get_running_loop().run_in_executor(
                 None,
-                callable_parse_pipeline
+                lambda: CommandParser(content, resolve_subcommands).parse()
             )
 
             output = await self.handle_pipeline_execution(
@@ -1345,7 +1196,7 @@ class Bot:
             # Exception "amigável", envie isso no contexto atual de volta para o usuário
             await ctx.reply(e)
 
-    async def handle_pipeline_execution(self, target_commands: CommandsManager, ctx: Context, pipeline, activator_args: list=None, activator_flags: dict=None):
+    async def handle_pipeline_execution(self, target_commands: CommandDictionary, ctx: Context, pipeline, activator_args: list=None, activator_flags: dict=None):
         pipeline_output = ''
         
         for command in pipeline:
@@ -1464,22 +1315,6 @@ class Bot:
 
         return output
 
-    async def callable_update_playing(self, intervalcontext: IntervalContext, kwargs: dict):
-        index = kwargs.get('index', 0)
-        playing_list = self.config.get('global.playing', None)
-
-        if not playing_list or len(playing_list) == 1:
-            intervalcontext.safe_halt = True
-
-            if playing_list:
-                await self.set_playing_game(playing_list[index])
-        else:
-            if index >= len(playing_list):
-                index = 0
-
-            await self.set_playing_game(playing_list[index])
-            kwargs['index'] = index + 1
-
 class Slider:
     def __init__(self, bot: Bot, ctx: BotContext, items: list, reaction_right: str=r'▶️', reaction_left: str=r'◀️', restricted: bool=False, startat: int=0, timeout: int=60):
         assert items
@@ -1581,4 +1416,3 @@ class Slider:
                     ClientEvent.REACTION_ADD,
                     self.registered_event_id
                 )
-                

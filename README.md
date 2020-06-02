@@ -35,11 +35,11 @@ O grande diferencial deste bot, é a implementação de um operador PIPE (|) e a
 
 ![Operador PIPE](https://raw.githubusercontent.com/Kubinyete/navibot/dev/repo/doc/operador-pipe.png)
 
-Adicionalmente, é possível registrar "ganchos" que são carregados e registram-se em eventos do cliente, como é o caso deste ModuleHook que fica responsável por receber os membros que recentemente entraram em uma Guild, e processar, de acordo com o contexto da Guild, a mensagem de boas-vindas configurada pela Guild (que neste caso, assumimos também que seja um comando).
+Adicionalmente, é possível registrar "ganchos" que são carregados e registram-se em eventos do cliente, como é o caso deste Plugin que fica responsável por receber os membros que recentemente entraram em uma Guild, e processar, de acordo com o contexto da Guild, a mensagem de boas-vindas configurada pela Guild (que neste caso, assumimos também que seja um comando).
 
 ```py
 # modules/core_moderation.py
-class HWelcomeMessage(ModuleHook):
+class HWelcomeMessage(Plugin):
     async def callable_receive_member_join(self, kwargs):
         member = kwargs.get('member')
 
@@ -69,7 +69,7 @@ class HWelcomeMessage(ModuleHook):
         )
 ```
 
-O resultado deste ModuleHook, após o processamento do comando de boas-vindas específicado pelo moderador da Guild, temos a seguinte mensagem:
+O resultado deste Plugin, após o processamento do comando de boas-vindas específicado pelo moderador da Guild, temos a seguinte mensagem:
 
 ![Mensagem de boas-vindas](https://raw.githubusercontent.com/Kubinyete/navibot/dev/repo/doc/welcome-message.png)
 

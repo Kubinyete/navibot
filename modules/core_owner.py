@@ -9,9 +9,7 @@ import PIL.ImageFont
 import PIL.ImageDraw
 
 from navibot.client import BotCommand, InterpretedCommand, PermissionLevel, EmojiType
-from navibot.parser import CommandParser
 from navibot.errors import CommandError
-from navibot.util import bytes_string, normalize_image_size
 
 class CSetAvatar(BotCommand):
     def __init__(self, bot):
@@ -179,7 +177,7 @@ class CAddCommand(BotCommand):
         cmd = ' '.join(args[1:])
 
         try:    
-            self.bot.add_interpreted_command(
+            self.bot.commands.add_interpreted_command(
                 InterpretedCommand(
                     self.bot,
                     cmd,
@@ -209,7 +207,7 @@ class CRemoveCommand(BotCommand):
             return self.get_usage_embed(ctx)
 
         try:
-            self.bot.remove_interpreted_command(args[0])
+            self.bot.commands.remove_interpreted_command(args[0])
             
             return EmojiType.CHECK_MARK
         except Exception as e:

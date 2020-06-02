@@ -6,7 +6,7 @@ class ErrorCollection(Exception):
 
 # @TODO: Fazer com que APIs retornem seus próprios objetos
 class AniListApi:
-    def __init__(self, aiohttpSession=aiohttp.ClientSession()):
+    def __init__(self, aiohttpSession: aiohttp.ClientSession):
         self.session = aiohttpSession
         self.domain = r'https://graphql.anilist.co'
 

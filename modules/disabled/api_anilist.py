@@ -15,7 +15,7 @@ class CAnilist(BotCommand):
             usage = "[-c|--character] [busca...] [--page=1]"
         )
 
-        self.api = AniListApi()
+        self.api = AniListApi(self.bot.get_http_session())
 
     async def run(self, message, args, flags):
         if 'character' in flags or 'c' in flags:

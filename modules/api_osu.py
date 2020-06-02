@@ -15,10 +15,7 @@ class COsu(BotCommand):
             usage = "username [--mode=osu|taiko|ctb|mania]"
         )
 
-        self.api = OsuApi(
-            self.bot.config.get('modules.osu.key'),
-            aiohttpSession=self.bot.get_http_session()
-        )
+        self.api = OsuApi(self.bot.config.get('modules.osu.key'), self.bot.get_http_session())
 
         self.assets_domain = r"https://a.ppy.sh"
         self.public_repo = self.bot.config.get('global.public_repo')
