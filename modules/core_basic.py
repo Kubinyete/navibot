@@ -161,7 +161,7 @@ class CRoll(BotCommand):
         super().__init__(
             bot,
             name = "roll",
-            aliases = ['dice'],
+            aliases = ['dice', 'rand'],
             description = "Retorna um número aleatório entre [min=0] e [max=6].",
             usage = "[minimo] [maximo]"
         )
@@ -289,7 +289,7 @@ class CCount(BotCommand):
         super().__init__(
             bot,
             name = "count",
-            aliases = ['co'],
+            aliases = ['ct'],
             description = "Retorna o tamanho da lista de argumentos recebidos.",
             hidden = True
         )

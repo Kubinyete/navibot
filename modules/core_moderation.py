@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import discord
 
 from navibot.client import BotCommand, BotContext, EmojiType, PermissionLevel, ClientEvent, Plugin
 from navibot.parser import CommandParser

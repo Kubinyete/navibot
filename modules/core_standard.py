@@ -400,7 +400,7 @@ class CTriggered(BotCommand):
         super().__init__(
             bot,
             name = "triggered",
-            aliases = ['trig'],
+            aliases = ['trigg'],
             description = "T R I G G E R E D.",
             usage = '[URL] [@Usuario] [discord.File]',
             supported_args_type = (str, discord.File)

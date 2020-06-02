@@ -264,9 +264,7 @@ class CShutdown(CliCommand):
         )
 
     async def run(self, ctx, args, flags):
-        asyncio.create_task(
-            self.bot.stop()
-        )
+        asyncio.create_task(self.bot.astop())
 
         return 'Desligando...'
 

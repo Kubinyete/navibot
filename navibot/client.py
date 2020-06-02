@@ -55,6 +55,10 @@ class EmojiType(Enum):
     THUMBS_DOWN         = '👎'
     THINKING            = '🤔'
     OK_HAND             = '👌'
+    ARROW_FOWARD        = '▶️'
+    ARROW_BACKWARD      = '◀️'
+    ARROW_UPWARD        = '🔼'
+    ARROW_DOWNWARD      = '🔽'
 
 class ClientEvent(Enum):
     READY               = 'ready'

@@ -82,7 +82,8 @@ class ProgressionManager:
 
         self.sync_interval = IntervalContext(
             bot.config.get('modules.progression.sync_interval', 300),
-            self.callable_proccess_pending
+            self.callable_proccess_pending,
+            ignore_exception=True
         )
 
     def start_processing(self):
