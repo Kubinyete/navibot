@@ -256,7 +256,7 @@ class CProfile(BotCommand):
                 raise CommandError('O formato da imagem é inválido.')
 
             profile_avatar = normalize_image_max_size(profile_avatar.convert(mode='RGBA'), self.max_image_size)
-            profile_base = PIL.Image.new(mode='RGBA', size=(self.profile_template_fl.width, self.profile_template_fl.height), color=(255, 255, 255, 255)
+            profile_base = PIL.Image.new(mode='RGBA', size=(self.profile_template_fl.width, self.profile_template_fl.height), color=(255, 255, 255, 255))
 
             if profile_background:
                 logging.info(f'{profile_background}')
