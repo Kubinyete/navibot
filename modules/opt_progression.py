@@ -9,9 +9,10 @@ import PIL.Image
 import PIL.ImageFont
 import PIL.ImageDraw
 
-from navibot.client import Bot, BotCommand, PermissionLevel, EmojiType, ClientEvent, BotContext, Plugin, IntervalContext
+from navibot.helpers import IntervalContext
 from navibot.errors import CommandError
-from navibot.util import bytes_string, normalize_image_size
+from navibot.client import Bot, BotCommand, PermissionLevel, EmojiType, ClientEvent, BotContext, Plugin
+from navibot.util import bytes_string, normalize_image_max_size, normalize_image_fit_into
 from navibot.database.dal import MemberInfoDAL
 from navibot.database.models import MemberInfo
 
@@ -70,7 +71,7 @@ class PProgressionRewarder(Plugin):
 
         member_info, levelup = await self.manager.give_exp_reward(message.author.id, received_exp)
 
-        if levelup and show_levelup:
+        if levelup and show_levelup.get_value():
             await self.handle_levelup_message(message, member_info.get_current_level())
 
 class ProgressionManager:
@@ -110,15 +111,20 @@ class ProgressionManager:
             d = MemberInfoDAL(conn)
 
             for mem in pending_copy:
+                # @TODO:
+                # Isso é bizarro, mas por enquanto vamos pegar novamente o membro,
+                # trocar para isso:
+                # d.member_info_exists(mem.userid)
+                # Após ser implementado
                 member_exists = await d.get_member_info(mem.userid)
 
                 if not member_exists:
                     if not await d.create_member_info(mem):
                         logging.info(f'callable_proccess_pending Failed to create_member_info for member {mem.userid} in queue.')
                 else:
-                    if not await d.update_member_info_exp_only(mem):
-                        logging.info(f'callable_proccess_pending Failed to update_member_info_exp_only for member {mem.userid} in queue.')
-
+                    if member_exists.exp != mem.exp:
+                        if not await d.update_member_info_exp_only(mem):
+                            logging.info(f'callable_proccess_pending Failed to update_member_info_exp_only for member {mem.userid} in queue.')
         
         logging.info(f'Finished processing of pending_processing MemberInfo queue, took {time.perf_counter() - stamp} second(s).')
 
@@ -154,6 +160,13 @@ class ProgressionManager:
             return member_info, curr_level > prev_level
         else:
             return member_info, False
+
+    # @NOTE: Precisamos disso aqui para que, alem de MemberInfo ser alterado em cache
+    # que seja feita a alteração instanamente no banco, caso o usuário mude sua profile_cover
+    async def db_update_member_info_profile_cover_only(self, member_info: MemberInfo):
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            d = MemberInfoDAL(conn)
+            return await d.update_member_info_profile_cover_only(member_info)
 
 class CProfile(BotCommand):
     def __init__(self, bot):
@@ -228,44 +241,64 @@ class CProfile(BotCommand):
         bio_output = io.BytesIO()
 
         def callable_apply_profile_template():
-            curr_img = None
+            profile_avatar = None
+            profile_background = None
 
             try:
-                curr_img = PIL.Image.open(bio_input)
+                profile_avatar = PIL.Image.open(bio_input)
+
+                if member_info.profile_cover:
+                    profile_background = PIL.Image.open(io.BytesIO(member_info.profile_cover))
             except Exception:
                 raise CommandError('Não foi possível abrir a imagem a partir dos dados recebidos.')
 
-            if not curr_img.format in ('PNG', 'JPG', 'JPEG', 'GIF', 'WEBP'):
+            if not profile_avatar.format.lower() in self.supported_file_extensions or (profile_background and not profile_background.format.lower() in self.supported_file_extensions):
                 raise CommandError('O formato da imagem é inválido.')
 
-            curr_img = curr_img.convert(mode='RGBA')
-            curr_img = normalize_image_size(curr_img, self.max_image_size)
+            profile_avatar = normalize_image_max_size(profile_avatar.convert(mode='RGBA'), self.max_image_size)
+            profile_base = PIL.Image.new(mode='RGBA', size=(self.profile_template_fl.width, self.profile_template_fl.height), color=(255, 255, 255, 255)
 
-            profile_template = self.profile_template_fl.copy()
-            bar_template = self.profile_template_xpbar_full.copy()
-            
-            bar_template = bar_template.crop(
+            if profile_background:
+                logging.info(f'{profile_background}')
+                # Aplicando o plano de fundo
+                profile_base.paste(
+                    normalize_image_fit_into(profile_background.convert(mode='RGBA'), profile_base.width, profile_base.height),
+                    (
+                        0,
+                        0
+                    )
+                )
+
+            # Aplicando primeira camada do design do perfil
+            profile_base.paste(
+                self.profile_template_fl,
                 (
                     0,
-                    0,
-                    math.floor(bar_template.width * xp_factor),
-                    bar_template.height - 1
-                )
+                    0
+                ),
+                self.profile_template_fl
             )
 
-            # Imagem de perfil
-            profile_template.paste(
-                curr_img,
+            # Colando o avatar no perfil
+            profile_base.paste(
+                profile_avatar,
                 # 120 + 10 border
                 (
-                    math.floor(120 / 2 + 10 - curr_img.width / 2), 
-                    math.floor(120 / 2 + 10 - curr_img.height / 2)
+                    math.floor(120 / 2 + 10 - profile_avatar.width / 2), 
+                    math.floor(120 / 2 + 10 - profile_avatar.height / 2)
                 )
             )
 
-            # Template da barra de EXP
-            profile_template.paste(
-                bar_template,
+            # Colando a barra de EXP
+            profile_base.paste(
+                self.profile_template_xpbar_full.crop(
+                    (
+                        0,
+                        0,
+                        math.floor(self.profile_template_xpbar_full.width * xp_factor),
+                        self.profile_template_xpbar_full.height - 1
+                    )
+                ),
                 # Em x: 10, y: 185
                 (
                     10,
@@ -273,9 +306,9 @@ class CProfile(BotCommand):
                 )
             )
 
-            draw = PIL.ImageDraw.Draw(profile_template)
+            draw = PIL.ImageDraw.Draw(profile_base)
             
-            # Nome do usuário
+            # Escrevendo nome do usuário
             draw.text(
                 (
                     140,
@@ -288,8 +321,8 @@ class CProfile(BotCommand):
                 stroke_fill=(50, 50, 50, 255)
             )
 
+            # Escrevendo nível atual
             level_str = str(xp_curr_level)
-            # Nível atual
             draw.text(
                 (
                     120 / 2 - draw.textsize(level_str, font=self.font_raleway_bold)[0] / 2 + 10,
@@ -300,8 +333,8 @@ class CProfile(BotCommand):
                 font=self.font_raleway_bold
             )
 
+            # Escrevendo progresso de EXP
             progress_str = f'{member_info.exp}/{xp_level_ceil} xp'
-            # EXP restante
             draw.text(
                 (
                     390 - draw.textsize(progress_str, font=self.font_raleway_bold)[0],
@@ -312,7 +345,8 @@ class CProfile(BotCommand):
                 font=self.font_raleway_bold
             )
 
-            profile_template.save(bio_output, format='PNG')
+            # Salvando em um objeto BytesIO
+            profile_base.save(bio_output, format='PNG')
 
         await asyncio.get_running_loop().run_in_executor(
             None,

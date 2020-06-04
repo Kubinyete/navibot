@@ -103,16 +103,16 @@ def string_fullwidth(string):
 def string_fullwidth_alphanumeric(string):
     return ''.join([char_fullwidth_alphanumeric(char) for char in string])
 
-def normalize_image_size(img, size):
+def normalize_image_max_width_height(img, width, height):
     # @NOTE
     # Diminuindo o tamanho da imagem de entrada, evitando imagens gigantes
-    if img.width > size or img.height > size:
+    if img.width > width or img.height > height:
         fw = img.width
         fh = img.height
 
-        while fw > size or fh > size:
-            wfactor = size / fw 
-            hfactor = size / fh
+        while fw > width or fh > height:
+            wfactor = width / fw 
+            hfactor = height / fh
 
             if wfactor < 1:
                 fw *= wfactor
@@ -127,3 +127,28 @@ def normalize_image_size(img, size):
         ))
     else:
         return img
+
+def normalize_image_max_size(img, max_size):
+    return normalize_image_max_width_height(img, max_size, max_size)
+
+def normalize_image_fit_into(img, width, height):
+    if img.width != width and img.height != height:
+        fw = img.width
+        fh = img.height
+        wfactor = width / fw 
+        hfactor = height / fh
+        fw *= wfactor
+        fh *= wfactor
+        wfactor = width / fw 
+        hfactor = height / fh
+        if hfactor > 1:
+            fw *= hfactor
+            fh *= hfactor
+            
+        return img.resize((
+            math.floor(fw),
+            math.floor(fh)
+        ))
+    else:
+        return img
+

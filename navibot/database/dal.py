@@ -54,6 +54,16 @@ class MemberInfoDAL(BaseDAL):
             await self.conn.commit()
             return True
 
+    async def update_member_info_profile_cover_only(self, member: MemberInfo):
+        async with self.conn.cursor() as c:
+            await c.execute(
+                query='UPDATE member_info SET mem_profile_cover = %s WHERE mem_id = %s;',
+                args=(member.profile_cover, member.userid)
+            )
+
+            await self.conn.commit()
+            return True
+
     async def create_member_info(self, member: MemberInfo):
         async with self.conn.cursor() as c:
             await c.execute(

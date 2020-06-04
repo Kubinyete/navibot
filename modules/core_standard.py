@@ -9,9 +9,10 @@ import io
 import PIL.Image
 import aiohttp
 
-from navibot.client import BotCommand, CommandAlias, InterpretedCommand, TimeoutContext, PermissionLevel, EmojiType, Slider, Plugin, IntervalContext
+from navibot.helpers import IntervalContext, TimeoutContext
 from navibot.errors import CommandError
-from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string, bytes_string, normalize_image_size
+from navibot.client import BotCommand, CommandAlias, InterpretedCommand, PermissionLevel, EmojiType, Slider, Plugin
+from navibot.util import is_instance, seconds_string, parse_timespan_seconds, timespan_seconds, seconds_string, bytes_string, normalize_image_max_size
 
 class PPlayingStatusInterval(Plugin):
     def __init__(self, bot):
@@ -477,7 +478,7 @@ class CTriggered(BotCommand):
 
             curr_img = curr_img.convert(mode='RGBA')
             trigered_image_copy = self.triggered_image.copy()
-            curr_img = normalize_image_size(curr_img, self.max_image_size)
+            curr_img = normalize_image_max_size(curr_img, self.max_image_size)
 
             # @NOTE:
             # 1. Redimensionar trigered_image_copy para que tenha a mesma largura que curr_img
@@ -609,9 +610,9 @@ class CThinking(BotCommand):
 
             curr_img = curr_img.convert(mode='RGBA')
             thinking_image_copy = self.thinking_image.copy()
-            curr_img = normalize_image_size(curr_img, self.max_image_size)
+            curr_img = normalize_image_max_size(curr_img, self.max_image_size)
             # Redimensionar thinking_image_copy para que apresente 1/2 do tamanho vertical de curr_img
-            thinking_image_copy = normalize_image_size(thinking_image_copy, math.floor(curr_img.height / 2))
+            thinking_image_copy = normalize_image_max_size(thinking_image_copy, math.floor(curr_img.height / 2))
 
 
             curr_img.paste(

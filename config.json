@@ -5,21 +5,28 @@
         "playing": ["navibot.py", ";h"],
         "playing_delay": 120,
         "owner_ids": [136219803139571712],
+        "http_session_timeout": 30,
         "public_repo": "https://raw.githubusercontent.com/Kubinyete/navibot/dev/repo"
     },
     "database": {
-        "connection_string": "mysql://navibot:navibot@192.168.1.102/navibotdb"
+        "host": "192.168.1.102",
+        "port": 3306,
+        "user": "navibot",
+        "password": "navibot",
+        "db": "navibotdb"
     },
     "connections": {
-        "enable": true,
+        "enable": false,
         "listen": "127.0.0.1",
         "port": 7777
     },
     "guild_settings": {
         "bot_prefix": ";",
+        "bot_lang": "pt-BR",
         "nsfw_disabled": true,
         "gst_welcome_channel_id": 0,
-        "gst_welcome_channel_message": "embed -t \"{getmember --self --display_name} {choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"}\" -d \"Olá {getmember --self --mention}, seja bem-vindo ao servidor!\" -timg \"{av --self --size=512 --url}\""
+        "gst_welcome_channel_message": "embed -t \"{getmember --self --display_name} {choice \"acabou de chegar!\" \"está na área!\" \"chegou chegando!\"}\" -d \"Olá {getmember --self --mention}, seja bem-vindo ao servidor!\" -timg \"{av --self --size=512 --url}\" ",
+        "pro_show_levelup": false
     },
     "modules": {
         "osu": {
@@ -27,6 +34,11 @@
         },
         "steam": {
             "key": "TOKEN_OR_API_KEY"
+        },
+        "progression": {
+            "sync_interval": 120,
+            "expected_message_length": 50,
+            "expected_reward_value": 50
         }
     }
 }
