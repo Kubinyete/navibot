@@ -8,6 +8,7 @@ import time
 import PIL.Image
 import PIL.ImageFont
 import PIL.ImageDraw
+import PIL.ImageFilter
 
 from navibot.helpers import IntervalContext
 from navibot.errors import CommandError
@@ -180,6 +181,8 @@ class CProfile(BotCommand):
 
         self.profile_template_fl = PIL.Image.open(f'{self.bot.curr_path}/repo/profile/profile-template-fl.png')
         self.profile_template_xpbar_full = PIL.Image.open(f'{self.bot.curr_path}/repo/profile/profile-template-xpbar-full.png')
+        self.profile_template_fl.load()
+        self.profile_template_xpbar_full.load()
 
         # @NOTE:
         # Isso é um arquivo que pode ser compartilhado entre outros comandos caso necessário
@@ -187,17 +190,14 @@ class CProfile(BotCommand):
         self.font_raleway_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/fonts/Raleway-Bold.ttf', size=30)
 
         # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
-        self.profile_template_fl.load()
-        self.profile_template_xpbar_full.load()
 
-        self.max_image_byte_size = 512 * 1024 ^ 2
         self.max_image_size = 116
-        self.prefer_discord_avatar_image_size = 128
-        self.supported_file_extensions = ('png', 'jpg', 'jpeg', 'gif', 'webp')
+        self.prefered_avatar_size = 128
 
     async def run(self, ctx, args, flags):
-        mentions = flags.get('mentions', None)
+        prefered_image_output_format = self.get_prefered_output_image_format()
 
+        mentions = flags.get('mentions', None)
         target = None
 
         if not mentions:
@@ -213,54 +213,29 @@ class CProfile(BotCommand):
 
         target_name = target.name
         xp_curr_level = member_info.get_current_level()
-
         xp_level_floor = member_info.get_exp_required_for_level(xp_curr_level)
         xp_level_ceil = member_info.get_exp_required_for_level(xp_curr_level + 1)
-        
         xp_whole_level = xp_level_ceil - xp_level_floor
         xp_factor = (member_info.exp - xp_level_floor) / xp_whole_level
 
-        bytes = None
-        url = str(target.avatar_url_as(size=self.prefer_discord_avatar_image_size))
+        profile_avatar = await self.get_image_object_from_bytes(await self.get_image_from_url(str(target.avatar_url_as(size=self.prefered_avatar_size)), max_size=self.get_prefered_max_image_byte_size()))
+        profile_background = None
 
-        try:
-            async with self.bot.get_http_session().get(url) as resp:
-                if resp.status == 200:
-                    bytes = await resp.read()
-                else:
-                    raise CommandError("Não foi possível obter a imagem através da URL fornecida, o destino não retornou OK.")
-        except aiohttp.ClientError as e:
-            logging.exception(f'CPROFILE: {type(e).__name__}: {e}')
-            raise CommandError("Não foi possível obter a imagem através da URL fornecida.")
-        except asyncio.TimeoutError as e:
-            logging.exception(f'CPROFILE: {type(e).__name__}: {e}')
-            raise CommandError("Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.")
-        finally:
-            bio_input = io.BytesIO(bytes)
+        if member_info.profile_cover:
+            profile_background = await self.get_image_object_from_bytes(io.BytesIO(member_info.profile_cover))
 
-        bio_output = io.BytesIO()
+        output = io.BytesIO()
 
         def callable_apply_profile_template():
-            profile_avatar = None
-            profile_background = None
-
-            try:
-                profile_avatar = PIL.Image.open(bio_input)
-
-                if member_info.profile_cover:
-                    profile_background = PIL.Image.open(io.BytesIO(member_info.profile_cover))
-            except Exception:
-                raise CommandError('Não foi possível abrir a imagem a partir dos dados recebidos.')
-
-            if not profile_avatar.format.lower() in self.supported_file_extensions or (profile_background and not profile_background.format.lower() in self.supported_file_extensions):
-                raise CommandError('O formato da imagem é inválido.')
+            nonlocal profile_avatar
+            nonlocal profile_background
 
             profile_avatar = normalize_image_max_size(profile_avatar.convert(mode='RGBA'), self.max_image_size)
             profile_base = PIL.Image.new(mode='RGBA', size=(self.profile_template_fl.width, self.profile_template_fl.height), color=(255, 255, 255, 255))
+            profile_background = profile_background if profile_background else profile_avatar.filter(PIL.ImageFilter.BoxBlur(6))
 
             if profile_background:
-                logging.info(f'{profile_background}')
-                # Aplicando o plano de fundo
+                # Aplicando o plano de fundo caso ele exista
                 profile_base.paste(
                     normalize_image_fit_into(profile_background.convert(mode='RGBA'), profile_base.width, profile_base.height),
                     (
@@ -346,18 +321,16 @@ class CProfile(BotCommand):
             )
 
             # Salvando em um objeto BytesIO
-            profile_base.save(bio_output, format='PNG')
+            profile_base.save(output, format=prefered_image_output_format.upper())
 
         await asyncio.get_running_loop().run_in_executor(
             None,
             callable_apply_profile_template
         )
 
-        # @NOTE:
-        # discord.py: se não voltarmos o ponteiro, não lemos nada
-        bio_output.seek(0, io.SEEK_SET)
+        output.seek(0, io.SEEK_SET)
         return discord.File(
-            bio_output,
-            filename='profile.png'
+            output,
+            filename=f'profile.{prefered_image_output_format}'
         )
         

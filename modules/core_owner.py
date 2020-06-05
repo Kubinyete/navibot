@@ -22,6 +22,7 @@ class CSetAvatar(BotCommand):
             hidden = True
         )
 
+        self.http_max_file_size = 1 * 1024 * 1024
         self.discord_edit_timeout = 15
 
     async def run(self, ctx, args, flags):
@@ -32,13 +33,8 @@ class CSetAvatar(BotCommand):
         avatar_bytes = None
 
         try:
-            async with self.bot.get_http_session().get(avatar_url) as resp:
-                if resp.status == 200:
-                    avatar_bytes = await resp.read()
-                else:
-                    raise CommandError("Não foi possível obter o novo avatar através da URL fornecida, o destino não retornou OK.")
-        except aiohttp.ClientError as e:
-            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
+            avatar_bytes = self.bot.http.get_file(avatar_url, max_size=self.http_max_file_size)
+        except:
             raise CommandError("Não foi possível obter o novo avatar através da URL fornecida.")
 
         try:
@@ -48,15 +44,8 @@ class CSetAvatar(BotCommand):
                     avatar=avatar_bytes
                 ), self.discord_edit_timeout
             )
-        except discord.InvalidArgument as e:
-            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
-            raise CommandError("O formato de imagem fornecido não é suportado pelo Discord, favor informar os formatos (JPEG, PNG).")
-        except discord.HTTPException as e:
-            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
+        except (discord.InvalidArgument, discord.HTTPException, asyncio.TimeoutError):
             raise CommandError("Não foi possível editar o perfil do bot.")
-        except asyncio.TimeoutError as e:
-            logging.exception(f'CSETAVATAR: {type(e).__name__}: {e}')
-            raise CommandError("Não foi possível editar o perfil do bot, o tempo limite de envio foi excedido.")
             
         return EmojiType.CHECK_MARK
 
@@ -86,8 +75,7 @@ class CSetName(BotCommand):
                     username=username
                 ), self.discord_edit_timeout
             )
-        except (discord.InvalidArgument, discord.HTTPException, asyncio.TimeoutError) as e:
-            logging.exception(f'CSETNAME: {type(e).__name__}: {e}')
+        except (discord.InvalidArgument, discord.HTTPException, asyncio.TimeoutError):
             raise CommandError("Não foi possível editar o perfil do bot.")
             
         return EmojiType.CHECK_MARK
@@ -123,13 +111,9 @@ class CGuildVariables(BotCommand):
                 raise CommandError(f'A variável `{args[0]}` não existe no contexto da Guild atual.')
 
             if 'reset' in flags:
-                try:
-                    if await self.bot.guildsettings.remove_guild_variable(expected_variable):
-                        return EmojiType.CHECK_MARK
-                    else:
-                        return EmojiType.CROSS_MARK
-                except Exception as e:
-                    logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
+                if await self.bot.guildsettings.remove_guild_variable(expected_variable):
+                    return EmojiType.CHECK_MARK
+                else:
                     return EmojiType.CROSS_MARK
             else:
                 if len(args) > 1:
@@ -141,22 +125,12 @@ class CGuildVariables(BotCommand):
                     except ValueError:
                         raise CommandError(f'A variável `{args[0]}` não recebeu um tipo de dados coerente, **{expected_variable.valuetype.name.lower()}** esperado.')
 
-                    try:
-                        if await self.bot.guildsettings.update_guild_variable(expected_variable):
-                            return EmojiType.CHECK_MARK
-                        else:
-                            expected_variable.set_value(prev_value)
-                        
-                            return EmojiType.CROSS_MARK
-                    except Exception as e:
-                        logging.exception(f'CGUILDVARIABLES: {type(e).__name__}: {e}')
-                        
+                    if await self.bot.guildsettings.update_guild_variable(expected_variable):
+                        return EmojiType.CHECK_MARK
+                    else:
                         expected_variable.set_value(prev_value)
-                        
                         return EmojiType.CROSS_MARK
                 else:
-                    # Sem formatação, pois podemos utilizar o valor da variável em outros comandos
-                    # return f'**{expected_variable.valuetype.name.lower()}**:`{expected_variable.key}` = `{expected_variable.value}`\n'
                     return str(expected_variable.get_value())
 
 class CAddCommand(BotCommand):
@@ -187,8 +161,6 @@ class CAddCommand(BotCommand):
 
             return EmojiType.CHECK_MARK
         except Exception as e:
-            logging.exception(f'CADDCOMMAND: {type(e).__name__}: {e}')
-
             raise CommandError(f'Ocorreu um erro ao tentar adicionar o comando interpretado:\n\n`{e}`')
 
 class CRemoveCommand(BotCommand):
@@ -211,7 +183,6 @@ class CRemoveCommand(BotCommand):
             
             return EmojiType.CHECK_MARK
         except Exception as e:
-            logging.exception(f'CREMOVECOMMAND: {type(e).__name__}: {e}')
             raise CommandError(f'Ocorreu um erro ao tentar remover o comando interpretado:\n\n`{e}`')
 
 class CReload(BotCommand):
@@ -227,7 +198,7 @@ class CReload(BotCommand):
     async def run(self, ctx, args, flags):
         try:
             await self.bot.reload_all_modules()
+            
             return EmojiType.CHECK_MARK
         except Exception as e:
-            logging.exception(f'CHOTRELOAD: {type(e).__name__}: {e}')
             raise CommandError(f'Ocorreu um erro ao tentar efetuar o reload:\n\n`{type(e).__name__}: {e}`')

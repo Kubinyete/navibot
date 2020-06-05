@@ -13,12 +13,13 @@ import sys
 import io
 import aiohttp
 import aiomysql
+import PIL.Image
 
 from enum import Enum, auto
 
 from navibot.helpers import IntervalContext
 from navibot.parser import CommandParser
-from navibot.util import is_instance, is_subclass
+from navibot.util import is_instance, is_subclass, bytes_string
 from navibot.errors import *
 from navibot.database.dal import GuildVariableDAL
 from navibot.database.models import GuildVariable
@@ -287,6 +288,106 @@ class BotCommand(Command):
         except KeyError:
             self.usermap[author.id] = []
             return self.usermap[author.id]
+
+    def get_prefered_image_size(self):
+        return self.bot.config.get('modules.preferences.default_io_max_image_size', 256)
+
+    def get_prefered_max_image_byte_size(self):
+        return self.bot.config.get('modules.preferences.default_io_max_image_kb_size', 1024) * 1024
+
+    def get_prefered_supported_image_formats(self):
+        return self.bot.config.get('modules.preferences.default_io_supported_image_format', ('png', 'jpg', 'jpeg', 'gif', 'webp'))
+
+    def get_prefered_output_image_format(self):
+        return self.bot.config.get('modules.preferences.default_io_image_format', 'png')
+
+    async def get_image_from_url(self, image_url: str, max_size: int=0):
+        try:
+            return await self.bot.http.get_file(image_url, max_size=max_size)
+        except asyncio.TimeoutError:
+            raise CommandError('Não foi possível obter a imagem através da URL fornecida, o tempo limite da requisição foi atingido.')
+        except BotError as e:
+            raise CommandError(f"Não foi possível obter a imagem através da URL fornecida, {e}.")
+
+    async def get_image_object_from_bytes(self, image_bytes: io.BytesIO):
+        supported_image_formats = self.get_prefered_supported_image_formats()
+
+        def callable_image_format_is_valid():
+            nonlocal image_bytes
+            
+            try:
+                curr_img = PIL.Image.open(image_bytes)
+                curr_img.load()
+            except Exception:
+                raise CommandError('Não foi possível abrir a imagem a partir dos dados recebidos.')
+
+            if not curr_img.format or not curr_img.format.lower() in supported_image_formats:
+                raise CommandError(f'O formato da imagem é inválido, este comando só aceita imagens no(s) formato(s): {supported_image_formats}.')
+            else:
+                return curr_img
+
+        return await asyncio.get_running_loop().run_in_executor(
+            None,
+            callable_image_format_is_valid
+        )
+
+    async def get_image_target(self, ctx, args, flags, from_mention: bool=True, from_arg: bool=True, from_pipeline: bool=True, from_history: bool=True, from_author=False):
+        mentions = flags.get('mentions', None)
+        image_bytes = None
+        image_url = None
+
+        prefered_image_size = self.get_prefered_image_size()
+        max_size = self.get_prefered_max_image_byte_size()
+        supported_image_formats = self.get_prefered_supported_image_formats()
+
+        if mentions:
+            if not from_mention:
+                return
+
+            image_url = str(mentions[0].avatar_url_as(size=prefered_image_size))
+        else:
+            if args:
+                # Tem um arquivo já nos argumentos (resultado de outro comando na pipeline)?
+                image_url = [x for x in args if isinstance(x, discord.File)]
+                
+                if image_url:
+                    if not from_pipeline:
+                        return
+
+                    image_bytes = image_url[0].fp
+                    assert isinstance(image_bytes, io.BytesIO)
+                else:
+                    if not from_arg:
+                        return
+
+                    image_url = args[0]
+            else:
+                if from_author:
+                    assert ctx.author
+                    image_url = str(ctx.author.avatar_url_as(size=prefered_image_size))
+                else:
+                    if not from_pipeline:
+                        return
+
+                    history_max_depth = self.bot.config.get('modules.preferences.default_history_max_depth', 50)
+
+                    atch = await ctx.get_last_sent_attachment(
+                        history_max_depth, 
+                        supported_image_formats
+                    )
+
+                    if atch:
+                        if atch.size > max_size:
+                            raise CommandError(f'O tamanho em bytes da ultima imagem neste canal ultrapassa o limite permitido de {bytes_string(max_size)} pelo comando.')
+                        else:
+                            image_url = atch.url
+                    else:
+                        raise CommandError(f'Não foi possível encontrar uma imagem suportada no histórico do canal nas últimas {history_max_depth} mensagens.')
+
+        if not image_bytes:
+            image_bytes = await self.get_image_from_url(image_url, max_size=max_size)
+
+        return await self.get_image_object_from_bytes(image_bytes)
 
     async def run(self, ctx: BotContext, args: list, flags: dict):
         raise NotImplementedError()
@@ -850,6 +951,35 @@ class LocalizationManager:
         else:
             return self.translate(self.default_lang, tlkey)
 
+class HttpManager:
+    def __init__(self, default_timeout: int=60):
+        self.session = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(
+                total=default_timeout
+            )
+        )
+
+    async def get_file(self, url: str, max_size: int=0):
+        out = io.BytesIO()
+
+        async with self.session.get(url) as r:
+            if r.status != 200:
+                raise BotError(f'A requisição GET para {url} não retornou 200 OK.')
+
+            if max_size > 0:
+                assert 'CONTENT-LENGTH' in r.headers and int(r.headers.get('CONTENT-LENGTH')) <= max_size
+            
+            out.write(await r.read())
+
+        return out
+
+    async def get_json(self, url: str):
+        async with self.session.get(url) as r:
+            return await r.json()
+
+    async def close_session(self):
+        return await self.session.close()
+
 class Bot:
     def __init__(self, path: str=None, logenable: bool=True, logfile: str=None, loglevel=logging.DEBUG):
         # @NOTE:
@@ -877,7 +1007,8 @@ class Bot:
         self.commands = CommandDictionary()
         self.clicommands = CommandDictionary()
         self.plugins = PluginsManager()
-        self.guildsettings = GuildSettingsManager(self, default_values=self.config.get('guild_settings'))
+        self.http = HttpManager(default_timeout=30)
+        self.guildsettings = GuildSettingsManager(self, self.config.get('guild_settings'), cache_timelimit=60 * 30)
         self.lm = LocalizationManager(self.guildsettings, f'{self.curr_path}/localization.json', default_lang='pt-BR')
 
         # Objeto de conexão de banco de dados ativo no momento.
@@ -1026,21 +1157,6 @@ class Bot:
         await self.load_all_modules(True)
 
     # @NOTE: 
-    # Cria a ClientSession de forma lazy.
-    # @TODO:
-    # Em vez de fazer com que o bot seja responsável por criar a sessão, usar algum tipo
-    # de DownloadManager ou HTTPManager para ser responsável por isso.
-    def get_http_session(self):
-        if not self.active_http_session:
-            self.active_http_session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(
-                    total=self.config.get('global.http_session_timeout', 30)
-                )
-            )
-
-        return self.active_http_session
-
-    # @NOTE: 
     # Cria a conexão de forma lazy.
     # 
     # Aqui podemos também executar coisas antes de tentar obter a conexão:
@@ -1048,7 +1164,7 @@ class Bot:
     # vai chegar neste trecho de código.
     async def get_connection_pool(self):
         # Se não travarmos isso aqui, pode ser que aconteca 2 vezes ou mais o create_pool()
-        async with asyncio.Lock() as lock:
+        async with asyncio.Lock():
             if not self.connection_pool:
                 try:
                     self.connection_pool = await aiomysql.create_pool(
@@ -1330,16 +1446,10 @@ class Bot:
                     args, 
                     flags
                 )
-            except CommandError as e:
+            except (CommandError, DatabaseError) as e:
                 # Unica forma aceitável de Exception dentro de um comando.
                 logging.warn(f'Command {command.name} threw an error: {e}')
-                raise e
-            except (ParserError, BotError) as e:
-                # Essas Exceptions só são possíveis de serem recebidas caso estejamos executando um InterpretedCommand
-                assert isinstance(command, InterpretedCommand)
-                raise e
-            except DatabaseError as e:
-                # Exception relacionada a conexão com o banco de dados.
+                # Envia para cima, pois se ignorarmos isso não será mostrado para o usuário
                 raise e
             except Exception as e:
                 # Por padrão, não mostrar Exceptions vindo de comandos, deixar isso para o console.

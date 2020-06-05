@@ -55,13 +55,9 @@ class CNsfw(BotCommand):
             else:
                 return f"Conteúdo NSFW está atualmente **{'desabilitado' if var.get_value() else 'habilitado'}** para esta Guild."
 
-            try:
-                if await self.bot.guildsettings.update_guild_variable(var):
-                    return EmojiType.CHECK_MARK
-                else:
-                    return EmojiType.CROSS_MARK
-            except Exception as e:
-                logging.exception(f'CNSFW: {type(e).__name__}: {e}')
+            if await self.bot.guildsettings.update_guild_variable(var):
+                return EmojiType.CHECK_MARK
+            else:
                 return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `nsfw_disabled` não encontrado no contexto da Guild atual.')
@@ -93,13 +89,9 @@ class CSetWelcomeChannel(BotCommand):
             else:
                 var.set_value(channel.id)
 
-            try:
-                if await self.bot.guildsettings.update_guild_variable(var):
-                    return EmojiType.CHECK_MARK
-                else:
-                    return EmojiType.CROSS_MARK
-            except Exception as e:
-                logging.exception(f'CSETWELCOMECHANNEL: {type(e).__name__}: {e}')
+            if await self.bot.guildsettings.update_guild_variable(var):
+                return EmojiType.CHECK_MARK
+            else:
                 return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `gst_welcome_channel_id` não encontrado no contexto da Guild atual.')
@@ -125,13 +117,9 @@ class CSetWelcomeMessage(BotCommand):
 
             var.set_value(cmd)
 
-            try:
-                if await self.bot.guildsettings.update_guild_variable(var):
-                    return EmojiType.CHECK_MARK
-                else:
-                    return EmojiType.CROSS_MARK
-            except Exception as e:
-                logging.exception(f'CSETWELCOMEMESSAGE: {type(e).__name__}: {e}')
+            if await self.bot.guildsettings.update_guild_variable(var):
+                return EmojiType.CHECK_MARK
+            else:
                 return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `gst_welcome_channel_message` não encontrado no contexto da Guild atual.')
@@ -147,6 +135,8 @@ class CSimulateMemberJoin(BotCommand):
         )
 
     async def run(self, ctx, args, flags):
+        # @NOTE:
+        # Isso aqui é temporário, não faz sentido ativar um evento de MEMBER_JOIN inteiro só para testar o comando de boas-vindas
         await self.bot.client.dispatch_event(
             ClientEvent.MEMBER_JOIN,
             member=ctx.author
@@ -171,13 +161,9 @@ class CSetPrefix(BotCommand):
         if var:
             var.set_value(args[0])
 
-            try:
-                if await self.bot.guildsettings.update_guild_variable(var):
-                    return EmojiType.CHECK_MARK
-                else:
-                    return EmojiType.CROSS_MARK
-            except Exception as e:
-                logging.exception(f'CSETPREFIX: {type(e).__name__}: {e}')
+            if await self.bot.guildsettings.update_guild_variable(var):
+                return EmojiType.CHECK_MARK
+            else:
                 return EmojiType.CROSS_MARK
         else:
             raise CommandError('Variável `bot_prefix` não encontrado no contexto da Guild atual.')
