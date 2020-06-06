@@ -44,7 +44,7 @@
 - [X] profile [@Usuario]
     - [X] Monitorar e atribuir EXP para os membros
     - [X] Permitir visualizar uma assinatura de perfil
-        - [ ] Suporte a troca de fundo
+    - [X] Suporte a troca de fundo
         
 - [ ] credits [@Usuario]
 - [ ] exp [@Usuario]

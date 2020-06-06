@@ -318,7 +318,7 @@ class CProfile(BotCommand):
         xp_whole_level = xp_level_ceil - xp_level_floor
         xp_factor = (member_info.exp - xp_level_floor) / xp_whole_level
 
-        profile_avatar = await self.get_image_object_from_bytes(await self.get_image_from_url(str(target.avatar_url_as(size=self.prefered_avatar_size)), max_size=self.get_prefered_max_image_byte_size()))
+        profile_avatar = await self.get_image_object_from_bytes(await self.get_file_from_url(str(target.avatar_url_as(size=self.prefered_avatar_size)), max_size=self.get_prefered_max_image_byte_size()))
         profile_background = None
 
         if member_info.profile_cover:

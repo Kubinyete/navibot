@@ -22,26 +22,22 @@ class CSetAvatar(BotCommand):
             hidden = True
         )
 
-        self.http_max_file_size = 1 * 1024 * 1024
-        self.discord_edit_timeout = 15
+        # 5 MB
+        self.http_max_file_size = 5 * 1024 * 1024
+        self.discord_edit_timeout = 30
 
     async def run(self, ctx, args, flags):
         if not args:
             return self.get_usage_embed(ctx)
 
-        avatar_url = ' '.join(args)
-        avatar_bytes = None
-
-        try:
-            avatar_bytes = self.bot.http.get_file(avatar_url, max_size=self.http_max_file_size)
-        except:
-            raise CommandError("Não foi possível obter o novo avatar através da URL fornecida.")
+        avatar_url = args[0]
+        avatar_bytes = await self.get_file_from_url(avatar_url, max_size=self.http_max_file_size)
 
         try:
             # user.edit() pode travar caso ultrapassarmos o limite e ficarmos de cooldown ou se o upload estiver demorando muito (não seria comum neste caso).
             await asyncio.wait_for(
                 self.bot.client.user.edit(
-                    avatar=avatar_bytes
+                    avatar=avatar_bytes.getvalue()
                 ), self.discord_edit_timeout
             )
         except (discord.InvalidArgument, discord.HTTPException, asyncio.TimeoutError):

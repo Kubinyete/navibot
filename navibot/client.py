@@ -301,7 +301,7 @@ class BotCommand(Command):
     def get_prefered_output_image_format(self):
         return self.bot.config.get('modules.preferences.default_io_image_format', 'png')
 
-    async def get_image_from_url(self, image_url: str, max_size: int=0):
+    async def get_file_from_url(self, image_url: str, max_size: int=0):
         try:
             return await self.bot.http.get_file(image_url, max_size=max_size)
         except asyncio.TimeoutError:
@@ -385,7 +385,7 @@ class BotCommand(Command):
                         raise CommandError(f'Não foi possível encontrar uma imagem suportada no histórico do canal nas últimas {history_max_depth} mensagens.')
 
         if not image_bytes:
-            image_bytes = await self.get_image_from_url(image_url, max_size=max_size)
+            image_bytes = await self.get_file_from_url(image_url, max_size=max_size)
 
         return await self.get_image_object_from_bytes(image_bytes)
 
@@ -971,6 +971,7 @@ class HttpManager:
             
             out.write(await r.read())
 
+        out.seek(0, io.SEEK_SET)
         return out
 
     async def get_json(self, url: str):
