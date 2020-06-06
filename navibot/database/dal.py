@@ -16,13 +16,28 @@ class MemberInfoDAL(BaseDAL):
         return MemberInfo(
             memid,
             row[0],
-            row[1]
+            row[1] if len(row) > 1 else None
         )
 
     async def get_member_info(self, memid: int):
         async with self.conn.cursor() as c:
             await c.execute(
                 query='SELECT mem_exp, mem_profile_cover FROM member_info WHERE mem_id = %s LIMIT 1;',
+                args=(memid, )
+            )
+
+            rows = await c.fetchone()
+            await self.conn.commit()
+
+            return self.map_current_object(
+                rows, 
+                memid=memid
+            ) if rows else None
+
+    async def get_member_info_cacheable(self, memid: int):
+        async with self.conn.cursor() as c:
+            await c.execute(
+                query='SELECT mem_exp FROM member_info WHERE mem_id = %s LIMIT 1;',
                 args=(memid, )
             )
 

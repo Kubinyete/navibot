@@ -228,15 +228,13 @@ class CGetMember(BotCommand):
     async def run(self, ctx, args, flags):
         users = flags.get('mentions', None)
         
-        if 'self' in flags:
-            target = ctx.author
+        if users:
+            target = users[0]
         else:
-            target = users[0] if users else None
-
-        if not target:
-            return self.get_usage_embed(ctx)
+            target = ctx.author
 
         # @HACK: Atribuir target como se fosse o novo author da mensagem
+        # necessário devido ao rate_author_permission_level
         ctx.author = target
 
         ret = []

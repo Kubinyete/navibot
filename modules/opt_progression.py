@@ -5,6 +5,7 @@ import aiohttp
 import io
 import math
 import time
+import copy
 import PIL.Image
 import PIL.ImageFont
 import PIL.ImageDraw
@@ -129,15 +130,61 @@ class ProgressionManager:
         
         logging.info(f'Finished processing of pending_processing MemberInfo queue, took {time.perf_counter() - stamp} second(s).')
 
+    @staticmethod
+    def apply_uncacheable_attributes(cached_ver: MemberInfo, database_ver: MemberInfo):
+        # @NOTE:
+        # Esse método é necessário para juntar uma versão que esteja em cache, ou seja, contendo somente informações que são atualizadas constantemente (EXP)
+        # com atributos que só são obtidos do banco de dados quando necessários, pois não podem ficar em memória por muito tempo (espaço gasto atoa).
+
+        # Copia a instância em cache, pois essa instância está diretamente ligada ao dicionário de cache, e esse objeto não pode ser alterado diretamente
+        # em casos de atributos que não podem ficar em cache
+        instance = copy.copy(cached_ver)
+        # Aplica...
+        instance.profile_cover = database_ver.profile_cover
+
+        return instance
+
+    async def fetch_member_info(self, memid: int):
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            d = MemberInfoDAL(conn)
+            return await d.get_member_info(memid)
+
+    async def fetch_member_info_cacheable(self, memid: int):
+        async with (await self.bot.get_connection_pool()).acquire() as conn:
+            d = MemberInfoDAL(conn)
+            return await d.get_member_info_cacheable(memid)
+
+    async def fetch_member_info_full(self, memid: int):
+        in_cache = await self.get_cacheable_member_info(memid)
+
+        # @NOTE:
+        # Só lembrando, que get_cacheable_member_info, pode retornar uma instância em cache,
+        # o que está certo neste caso, mas também pode retornar uma nova instância direta do banco
+        # que acabou de ser carregada em cache, ou seja, in_cache e in_db vão estar identicos
+
+        if in_cache:
+            in_db = await self.fetch_member_info(memid)
+            
+            if in_db:
+                return self.apply_uncacheable_attributes(in_cache, in_db)
+            else:
+                # Nossa versão em cache é obsoleta?
+                # por hora, não faça nada
+                return in_cache
+        else:
+            # Não achou
+            return in_cache
+
     async def get_cacheable_member_info(self, memid: int):
         member_info = self.membermap.get(memid, None)
 
         if not member_info:
-            async with (await self.bot.get_connection_pool()).acquire() as conn:
-                d = MemberInfoDAL(conn)
-                member_info = await d.get_member_info(memid)
-                member_info = member_info if member_info else MemberInfo(memid, 0, None)
-                self.membermap[memid] = member_info
+            member_info = await self.fetch_member_info_cacheable(memid)
+            
+            if not member_info:
+                member_info = MemberInfo(memid, 0, None)
+
+            self.membermap[memid] = member_info
             
         return member_info
 
@@ -164,10 +211,62 @@ class ProgressionManager:
 
     # @NOTE: Precisamos disso aqui para que, alem de MemberInfo ser alterado em cache
     # que seja feita a alteração instanamente no banco, caso o usuário mude sua profile_cover
-    async def db_update_member_info_profile_cover_only(self, member_info: MemberInfo):
+    async def update_member_info_profile_cover_only(self, member_info: MemberInfo):
         async with (await self.bot.get_connection_pool()).acquire() as conn:
             d = MemberInfoDAL(conn)
             return await d.update_member_info_profile_cover_only(member_info)
+
+class CSetProfileCover(BotCommand):
+    def __init__(self, bot):
+        super().__init__(
+            bot,
+            name = "setprofilecover",
+            aliases = ['setpfc'],
+            description = "Atualiza a imagem de fundo do perfil do usuário de acordo com a imagem informada, caso nenhum argumento ou arquivo for informado através do operador |, este comando tentará pegar a ultima imagem enviada no canal que atenda os requisitos.",
+            usage = '[URL] [discord.File] [-r|--remove]',
+            supported_args_type = (str, discord.File)
+        )
+
+        self.store_profile_cover_with_max_size = 512
+
+    async def run(self, ctx, args, flags):
+        pm = self.bot.plugins.get_plugin_by_type(PProgressionRewarder).manager
+        member_info = await pm.get_cacheable_member_info(ctx.author.id)
+        
+        if not member_info:
+            raise CommandError(f'Não foi possível encontrar as informações deste usuário, o usuário não possui um perfil ou ainda está em processamento, por favor tente novamente mais tarde.')
+
+        is_removing = 'remove' in flags or 'r' in flags
+
+        bg = None
+        if not is_removing:
+            bg = await self.get_image_target(ctx, args, flags, from_mention=False, from_arg=True, from_pipeline=True, from_history=True)
+
+        if bg:
+            bytedata = io.BytesIO()
+
+            def callable_resize_and_save_image():
+                nonlocal bg
+                bg = normalize_image_max_size(bg.convert(mode='RGB'), self.store_profile_cover_with_max_size)
+                bg.save(bytedata, format='JPEG')
+
+            await asyncio.get_running_loop().run_in_executor(
+                None,
+                callable_resize_and_save_image
+            )
+
+            bytedata.seek(0, io.SEEK_SET)
+            member_info.profile_cover = bytedata.getvalue()
+        else:
+            if is_removing:
+                member_info.profile_cover = None
+            else:
+                return self.get_usage_embed(ctx)
+
+        if await pm.update_member_info_profile_cover_only(member_info):
+            return EmojiType.CHECK_MARK
+        else:
+            return EmojiType.CROSS_MARK
 
 class CProfile(BotCommand):
     def __init__(self, bot):
@@ -206,7 +305,8 @@ class CProfile(BotCommand):
             target = mentions[0]
 
         pm = self.bot.plugins.get_plugin_by_type(PProgressionRewarder).manager
-        member_info = await pm.get_cacheable_member_info(target.id)
+        member_info = await pm.fetch_member_info_full(target.id)
+
 
         if not member_info:
             raise CommandError(f'Não foi possível encontrar as informações deste usuário, o usuário não possui um perfil ou ainda está em processamento, por favor tente novamente mais tarde.')
