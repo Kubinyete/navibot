@@ -287,6 +287,7 @@ class CProfile(BotCommand):
         # Isso é um arquivo que pode ser compartilhado entre outros comandos caso necessário
         # se for preciso, fazer um sistema a parte de carregamento de fontes
         self.font_raleway_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/fonts/Raleway-Bold.ttf', size=30)
+        self.font_sourcecodepro_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/fonts/SourceCodePro-Bold.otf', size=18)
 
         # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
 
@@ -332,7 +333,7 @@ class CProfile(BotCommand):
 
             profile_avatar = normalize_image_max_size(profile_avatar.convert(mode='RGBA'), self.max_image_size)
             profile_base = PIL.Image.new(mode='RGBA', size=(self.profile_template_fl.width, self.profile_template_fl.height), color=(255, 255, 255, 255))
-            profile_background = profile_background if profile_background else profile_avatar.filter(PIL.ImageFilter.BoxBlur(6))
+            profile_background = profile_background if profile_background else profile_avatar.filter(PIL.ImageFilter.BoxBlur(3))
 
             if profile_background:
                 # Aplicando o plano de fundo caso ele exista
@@ -409,15 +410,15 @@ class CProfile(BotCommand):
             )
 
             # Escrevendo progresso de EXP
-            progress_str = f'{member_info.exp}/{xp_level_ceil} xp'
+            progress_str = f'{member_info.exp}/{xp_level_ceil} XP'
             draw.text(
                 (
-                    390 - draw.textsize(progress_str, font=self.font_raleway_bold)[0],
-                    140
+                    390 - draw.textsize(progress_str, font=self.font_sourcecodepro_bold)[0],
+                    160
                 ),
                 progress_str,
                 fill=(7, 194, 119),
-                font=self.font_raleway_bold
+                font=self.font_sourcecodepro_bold
             )
 
             # Salvando em um objeto BytesIO
