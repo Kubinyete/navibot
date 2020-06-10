@@ -79,11 +79,14 @@ class CPlay(BotCommand):
                         raise CommandError('Falha ao obter informações a partir da URL informada.')
                     
                     youtube_title = youtube_data['title']
+                    youtube_thumbnail = youtube_data['thumbnail']
                     youtube_duration = youtube_data['duration']
-                    youtube_formats = youtube_data['requested_formats']
+                    youtube_formats = youtube_data['formats']
 
                     if not youtube_formats:
                         raise CommandError('Nenhum formato adequado foi retornado do YouTube.')
+                        
+                    # logging.info(f'youtube_formats = {youtube_formats}')
 
                     youtube_data_stream_url = youtube_formats[0]['url']
 
@@ -105,11 +108,15 @@ class CPlay(BotCommand):
 
                     vclient.play(
                         discord.PCMVolumeTransformer(
-                            discord.FFmpegPCMAudio(youtube_data_stream_url), 
+                            discord.FFmpegPCMAudio(youtube_data_stream_url,
+                            # Precisamos passar argumentos para o FFMPEG, para que o processo tente reconectar caso tenhamos a sessão HTTPS invalidada.
+                            before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'), 
                             volume=.5
                         ),
                         after=callable_after_playing
                     )
+
+                    return EmojiType.CHECK_MARK
             else:
                 raise CommandError('Eu já estou tocando um áudio em um canal de voz, por favor tente novamente mais tarde.')
 
