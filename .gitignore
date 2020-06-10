@@ -131,3 +131,4 @@ release/*
 *.log
 *.pid
 archive/*
+repo/audio/*

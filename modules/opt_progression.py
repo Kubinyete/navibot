@@ -286,8 +286,8 @@ class CProfile(BotCommand):
         # @NOTE:
         # Isso é um arquivo que pode ser compartilhado entre outros comandos caso necessário
         # se for preciso, fazer um sistema a parte de carregamento de fontes
-        self.font_raleway_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/fonts/Raleway-Bold.ttf', size=30)
-        self.font_sourcecodepro_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/fonts/SourceCodePro-Bold.otf', size=18)
+        self.font_raleway_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/font/Raleway-Bold.ttf', size=30)
+        self.font_sourcecodepro_bold = PIL.ImageFont.truetype(f'{self.bot.curr_path}/repo/font/SourceCodePro-Bold.otf', size=18)
 
         # Deixa os bytes em memória, para que não seja preciso ficar pegando do disco toda vez.
 
