@@ -1173,7 +1173,8 @@ class Bot:
                         port=self.config.get('database.port', 3306),
                         user=self.config.get('database.user', 'root'),
                         password=self.config.get('database.password', ''),
-                        db=self.config.get('database.db', 'navibotdb')
+                        db=self.config.get('database.db', 'navibotdb'),
+                        autocommit=True
                     )
                 except Exception as e:
                     logging.error(f'Connecting to the database failed: {e}')

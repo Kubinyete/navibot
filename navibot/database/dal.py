@@ -27,12 +27,11 @@ class MemberInfoDAL(BaseDAL):
             )
 
             rows = await c.fetchone()
-            await self.conn.commit()
-
-            return self.map_current_object(
-                rows, 
-                memid=memid
-            ) if rows else None
+        
+        return self.map_current_object(
+            rows, 
+            memid=memid
+        ) if rows else None
 
     async def get_member_info_cacheable(self, memid: int):
         async with self.conn.cursor() as c:
@@ -42,12 +41,11 @@ class MemberInfoDAL(BaseDAL):
             )
 
             rows = await c.fetchone()
-            await self.conn.commit()
-
-            return self.map_current_object(
-                rows, 
-                memid=memid
-            ) if rows else None
+        
+        return self.map_current_object(
+            rows, 
+            memid=memid
+        ) if rows else None
 
     async def update_member_info(self, member: MemberInfo):
         async with self.conn.cursor() as c:
@@ -56,8 +54,7 @@ class MemberInfoDAL(BaseDAL):
                 args=(member.exp, member.profile_cover, member.userid)
             )
 
-            await self.conn.commit()
-            return True
+        return True
 
     async def update_member_info_exp_only(self, member: MemberInfo):
         async with self.conn.cursor() as c:
@@ -66,8 +63,7 @@ class MemberInfoDAL(BaseDAL):
                 args=(member.exp, member.userid)
             )
 
-            await self.conn.commit()
-            return True
+        return True
 
     async def update_member_info_profile_cover_only(self, member: MemberInfo):
         async with self.conn.cursor() as c:
@@ -76,8 +72,7 @@ class MemberInfoDAL(BaseDAL):
                 args=(member.profile_cover, member.userid)
             )
 
-            await self.conn.commit()
-            return True
+        return True
 
     async def create_member_info(self, member: MemberInfo):
         async with self.conn.cursor() as c:
@@ -86,8 +81,7 @@ class MemberInfoDAL(BaseDAL):
                 args=(member.userid, member.exp, member.profile_cover)
             )
 
-            await self.conn.commit()
-            return True
+        return True
 
 class GuildVariableDAL(BaseDAL):
     def map_current_object(self, row, guildid: int=None, key: str=None):
@@ -113,13 +107,12 @@ class GuildVariableDAL(BaseDAL):
             )
 
             rows = await c.fetchone()
-            await self.conn.commit()
-
-            return self.map_current_object(
-                rows, 
-                guildid=guildid, 
-                key=key
-            ) if rows else None
+        
+        return self.map_current_object(
+            rows, 
+            guildid=guildid, 
+            key=key
+        ) if rows else None
 
     async def get_all_variables(self, guildid: int):
         async with self.conn.cursor() as c:
@@ -130,14 +123,13 @@ class GuildVariableDAL(BaseDAL):
             )
 
             rows = c.fetchall()
-            await self.conn.commit()
-
-            return [
-                self.map_current_object(
-                    row
-                ) 
-                for row in rows
-            ] if rows else rows
+        
+        return [
+            self.map_current_object(
+                row
+            ) 
+            for row in rows
+        ] if rows else rows
 
     async def create_variable(self, variable: GuildVariable):
         async with self.conn.cursor() as c:
@@ -146,19 +138,16 @@ class GuildVariableDAL(BaseDAL):
                 args=(variable.guildid, variable.key, variable.value, variable.valuetype.value)
             )
 
-            await self.conn.commit()
-            return True
+        return True
 
     async def update_variable(self, variable: GuildVariable):
         async with self.conn.cursor() as c:
             await c.execute(
                 query='UPDATE guild_settings SET gst_value = %s, gst_value_type = %s WHERE gui_id = %s AND gst_key = %s;',
-                args=(variable.guildid, variable.key, variable.value, variable.valuetype.value)
-            
+                args=(variable.value, variable.valuetype.value, variable.guildid, variable.key)
             )
 
-            await self.conn.commit()
-            return True
+        return True
 
     async def remove_variable(self, variable: GuildVariable):
         async with self.conn.cursor() as c:
@@ -167,5 +156,4 @@ class GuildVariableDAL(BaseDAL):
                 args=(variable.guildid, variable.key)
             )
 
-            await self.conn.commit()
-            return True
+        return True
