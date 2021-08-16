@@ -523,8 +523,8 @@ class Plugin(IBotNotifiable):
         await self.on_bot_ready()
 
 class Client(discord.Client):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kawrgs):
+        super().__init__(*args, **kawrgs)
         
         # Eventos globais, sempre ativados antes dos associados
         self.listeners = {}
@@ -1000,7 +1000,7 @@ class Bot:
         # Nosso objeto para carregar valores do arquivo de configurações
         # Prepara as Configs e o Client
         self.config = Config(f'{self.curr_path}/release/config.json')
-        self.client = Client()
+        self.client = Client(intents=discord.Intents.all())
 
         # @NOTE: 
         # Componentes essenciais:
